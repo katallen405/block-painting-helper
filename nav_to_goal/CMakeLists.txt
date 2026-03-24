@@ -18,6 +18,7 @@ install(DIRECTORY config DESTINATION share/${PROJECT_NAME}/)
 install(PROGRAMS
   nav_to_goal/navigator_node.py
   DESTINATION lib/${PROJECT_NAME}
+  RENAME navigator_node
 )
 
 if(BUILD_TESTING)

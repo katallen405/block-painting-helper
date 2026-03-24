@@ -50,7 +50,7 @@ def generate_launch_description():
 
     # ── Launch arguments ───────────────────────────────────────────────────
     use_sim_time_arg = DeclareLaunchArgument(
-        "use_sim_time", default_value="false",
+        "use_sim_time",
         description="Use simulation (Gazebo) clock"
     )
     params_file_arg = DeclareLaunchArgument(
@@ -115,16 +115,16 @@ def generate_launch_description():
 
     # ── 3. Nav2 bringup (no AMCL — SLAM provides localisation) ────────────
     nav2_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(nav2_bringup_dir, "launch", "navigation_launch.py")
-        ),
-        launch_arguments={
-            "use_sim_time": use_sim_time,
-            "params_file": params_file,
-            "use_lifecycle_mgr": "true",
-            "use_composition": "false",
-        }.items(),
-    )
+            PythonLaunchDescriptionSource(
+                os.path.join(nav2_bringup_dir, "launch", "navigation_launch.py")
+            ),
+            launch_arguments={
+                "use_sim_time": use_sim_time,
+                "params_file": params_file,
+                "use_collision_monitor": "False",
+                "use_docking_server": "False",
+            }.items(),
+        )
 
     # ── 4. Navigator goal node ─────────────────────────────────────────────
     navigator_node = Node(
