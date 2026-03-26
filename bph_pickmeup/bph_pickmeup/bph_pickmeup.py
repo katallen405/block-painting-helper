@@ -1,4 +1,3 @@
-
 from moveit_py import MoveItPy
 from moveit_msgs.msg import CollisionObject
 import rclpy
