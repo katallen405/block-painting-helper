@@ -20,7 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'smach_node = bph_statemachine.bph_statemachine:main',
+            'bph_statemachine_node = bph_statemachine.bph_statemachine:main',
         ],
     },
 )
