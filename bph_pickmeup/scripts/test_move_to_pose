@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""Manual test script for the move_to_pose service.
+
+Usage:
+    ros2 run bph_pickmeup test_move_to_pose
+    ros2 run bph_pickmeup test_move_to_pose --ros-args -p arm_name:=right_arm
+"""
+
+import sys
+
+import rclpy
+from rclpy.node import Node
+from geometry_msgs.msg import PoseStamped
+from bph_pickmeup_msgs.srv import MoveToPose
+
+
+# Edit these to match your robot
+DEFAULT_ARM = ''                   # empty = use node's default_arm parameter
+DEFAULT_END_EFFECTOR = 'hand'      # link name to move to the target pose
+DEFAULT_FRAME = 'base_link'        # planning frame
+
+
+class MoveToPoseTestClient(Node):
+    def __init__(self):
+        super().__init__('test_move_to_pose')
+        self.declare_parameter('arm_name', DEFAULT_ARM)
+        self.declare_parameter('end_effector_link', DEFAULT_END_EFFECTOR)
+        self.declare_parameter('frame_id', DEFAULT_FRAME)
+        self._client = self.create_client(MoveToPose, 'move_to_pose')
+
+    def send_request(self, x, y, z, qx=0.0, qy=0.0, qz=0.0, qw=1.0):
+        if not self._client.wait_for_service(timeout_sec=5.0):
+            self.get_logger().error('move_to_pose service not available')
+            return None
+
+        target_pose = PoseStamped()
+        target_pose.header.frame_id = self.get_parameter('frame_id').value
+        target_pose.header.stamp = self.get_clock().now().to_msg()
+        target_pose.pose.position.x = x
+        target_pose.pose.position.y = y
+        target_pose.pose.position.z = z
+        target_pose.pose.orientation.x = qx
+        target_pose.pose.orientation.y = qy
+        target_pose.pose.orientation.z = qz
+        target_pose.pose.orientation.w = qw
+
+        req = MoveToPose.Request()
+        req.target_pose = target_pose
+        req.arm_name = self.get_parameter('arm_name').value
+        req.end_effector_link = self.get_parameter('end_effector_link').value
+
+        self.get_logger().info(
+            f'Requesting move to ({x}, {y}, {z}) '
+            f'arm="{req.arm_name or "<default>"}" '
+            f'link="{req.end_effector_link}"'
+        )
+        return self._client.call(req)
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    client = MoveToPoseTestClient()
+
+    # --- test poses ---
+    tests = [
+        dict(label='forward reach',  x=0.4, y=0.0,  z=0.5),
+        dict(label='left side',      x=0.3, y=0.2,  z=0.5),
+        dict(label='low position',   x=0.3, y=0.0,  z=0.2),
+    ]
+
+    passed = 0
+    for test in tests:
+        label = test.pop('label')
+        response = client.send_request(**test)
+        if response is None:
+            client.get_logger().error(f'[{label}] No response (service unavailable)')
+            break
+        status = 'PASS' if response.success else 'FAIL'
+        client.get_logger().info(f'[{label}] {status}: {response.message}')
+        if response.success:
+            passed += 1
+
+    client.get_logger().info(f'{passed}/{len(tests)} tests passed')
+    client.destroy_node()
+    rclpy.shutdown()
+    sys.exit(0 if passed == len(tests) else 1)
+
+
+if __name__ == '__main__':
+    main()

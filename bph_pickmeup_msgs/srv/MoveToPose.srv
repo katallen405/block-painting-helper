@@ -1,0 +1,6 @@
+geometry_msgs/PoseStamped target_pose
+string arm_name          # leave empty to use default arm
+string end_effector_link # link name to move to target pose
+---
+bool success
+string message
