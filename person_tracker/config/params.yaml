@@ -1,0 +1,71 @@
+# config/params.yaml
+# Parameters for the PersonTrackerNode.
+# Copy and edit this file for your specific setup.
+
+person_tracker:
+  ros__parameters:
+
+    # -------------------------------------------------------------------
+    # Model
+    # -------------------------------------------------------------------
+    # YOLOv8 pose model to use. On first run, ultralytics will auto-download
+    # the weights if only a filename is given.
+    #
+    # Size options (speed vs accuracy tradeoff):
+    #   yolov8n-pose.pt  ← nano,  fastest,  least accurate  (~6 MB)
+    #   yolov8s-pose.pt  ← small                             (~23 MB)
+    #   yolov8m-pose.pt  ← medium                            (~52 MB)
+    #   yolov8l-pose.pt  ← large                             (~87 MB)
+    #   yolov8x-pose.pt  ← extra, slowest, most accurate    (~137 MB)
+    model_path: "yolov8n-pose.pt"
+
+    # Detection confidence threshold [0.0, 1.0].
+    # Lower = more detections (more false positives).
+    # Higher = fewer detections (more missed persons).
+    confidence: 0.5
+
+    # Inference device: "cpu", "cuda:0", "mps" (Apple Silicon)
+    device: "cpu"
+
+    # -------------------------------------------------------------------
+    # Tracker
+    # -------------------------------------------------------------------
+    # ByteTrack is faster and better for crowded scenes.
+    # BoTSORT uses Re-ID features — more robust to occlusion but slower.
+    # Both configs are bundled with ultralytics.
+    tracker: "bytetrack.yaml"
+
+    # -------------------------------------------------------------------
+    # Zones
+    # -------------------------------------------------------------------
+    # Named workspace zones. Each zone gets its own filtered topic set:
+    #   /person_tracker/<name>/detections
+    #   /person_tracker/<name>/poses
+    #
+    # The global /person_tracker/detections topic always publishes ALL
+    # detections regardless of zones.
+    #
+    # Format: JSON dict mapping zone name to a list of [x,y] pixel pairs.
+    # Use an empty dict {} to disable zone filtering (global topics only).
+    #
+    # Example for a 640×480 room-overview camera:
+    zones: >-
+      {
+        "arm":       [[80, 40], [380, 40], [380, 340], [80, 340]],
+        "turtlebot": [[320, 180], [600, 180], [600, 440], [320, 440]]
+      }
+
+    # -------------------------------------------------------------------
+    # Depth / 3D pose estimation
+    # -------------------------------------------------------------------
+    # Set to true if you have an RGB-D camera (e.g. RealSense, Zed, OAK-D)
+    # and want 3D positions published on /person_tracker/poses.
+    # Requires /camera/depth/image_rect_raw and /camera/depth/camera_info.
+    depth_enabled: false
+
+    # -------------------------------------------------------------------
+    # Visualisation
+    # -------------------------------------------------------------------
+    # Publish annotated image on /person_tracker/image_raw.
+    # Disable in production to save bandwidth/CPU.
+    publish_viz: true

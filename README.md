@@ -1,10 +1,10 @@
 # block-painting-helper
-A ros2 multimodal system for helping the user paint on wooden blocks
+A ros2 multimodal system for helping the user paint on wooden blocks or do other close-quarters manipulation tasks where an extra hand would be useful
 
 Includes ros packages:
 - bph_pickmeup:  a MoveIt package for picking up an object and moving it into the user's workspace
-- bph_perception: a perception tool for identifying the desired object so that it can be manipulated
-- nav_to_goal: a Nav2 node for moving around the room avoiding obstacles to retrieve the desired object (with help from Claude Sonnet 4.6)
+- person_finder:  a node using OpenCV and YOLO to find people in the room who might need to be avoided by either the Turtlebot or the manipulator arm
+- nav_to_goal: a Nav2 node for moving around the room avoiding obstacles to retrieve the desired object 
 - bph_statemachine: a SMACH package for high-level control of the system and triggering the other nodes
 
 Not included in this repository but used here:
