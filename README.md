@@ -15,5 +15,6 @@ https://github.com/katallen405/springcontroller
 
 STATUS:
 - 23 March 2026:  initial implementation 2f38d12
-- 30 March 2026:  MoveIt and NavStack assignment b7e4767 
+- 30 March 2026:  MoveIt and NavStack assignment b7e4767
+- 6 March 2026:  Perception Assignment 9f7e5e0 (not tested with camera)
 
