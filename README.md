@@ -22,5 +22,6 @@ pip install "numpy<2"
 STATUS:
 - 23 March 2026:  initial implementation 2f38d12
 - 30 March 2026:  MoveIt and NavStack assignment b7e4767
-- 6 March 2026:  Perception Assignment 9f7e5e0 (not tested with camera)
+- 6 March 2026:  Perception Assignment 19c79af (including venv instructions)
+   
 
