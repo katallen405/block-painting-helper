@@ -18,6 +18,9 @@ pip install ultralytics
 pip uninstall opencv-python
 pip install "numpy<2"
 
+In each terminal or in your .bashrc:
+export PYTHONPATH=$VIRTUAL_ENV/lib/python3.12/site-packages:$PYTHONPATH
+(this allows ROS to use the venv)
 
 STATUS:
 - 23 March 2026:  initial implementation 2f38d12
