@@ -20,8 +20,6 @@ designed for robot arm collision avoidance.
 **ROS2** (Humble or later) with:
 ```
 vision_msgs  cv_bridge  sensor_msgs  geometry_msgs
-
-v4l2-camera (for the USB camera, started by this node)
 ```
 
 **Python packages:**

@@ -296,6 +296,7 @@ class PersonTrackerNode(Node):
                 det.bbox.size_x = float(x2 - x1)
                 det.bbox.size_y = float(y2 - y1)
                 hyp = ObjectHypothesisWithPose()
+                det.id = str(id)
                 hyp.hypothesis.class_id = "person"
                 hyp.hypothesis.score    = conf
                 det.results.append(hyp)

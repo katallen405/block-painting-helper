@@ -28,6 +28,7 @@ setup(
     entry_points={
         "console_scripts": [
             "person_tracker_node = person_tracker.person_tracker_node:main",
+            "topdown_viz_node = person_tracker.topdown_viz_node:main",
         ],
     },
 )
