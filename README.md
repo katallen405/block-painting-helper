@@ -11,6 +11,12 @@ Not included in this repository but used here:
 - springcontroller: a platform-independent ROS node for torque control of a robot arm using virtual springs for constraints on the arm's position in the user's workspace
 https://github.com/katallen405/springcontroller
 
+# Installation details:
+to run the person_tracker node, you need a virtual environment (venv) created with --system-site-packages
+Inside the venv, you need to 
+pip install ultralytics 
+pip uninstall opencv-python
+pip install "numpy<2"
 
 
 STATUS:
