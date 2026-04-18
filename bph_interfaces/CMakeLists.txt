@@ -7,6 +7,7 @@ find_package(geometry_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/MoveToPose.srv"
+  "action/BphPickmeup.action"
   DEPENDENCIES geometry_msgs
 )
 

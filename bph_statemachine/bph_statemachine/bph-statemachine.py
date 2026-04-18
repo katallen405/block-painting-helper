@@ -1,245 +1,594 @@
 #!/usr/bin/env python3
-# Copyright 2026 Kat Allen
+"""
+ROS2 SMACH State Machine: Pick and Place
+States:
+  - FindObjectLocation
+  - ReadyToPickUpObject
+  - MovingToPickUpObject
+  - PickUpObject
+  - ObjectInGripperMoveToWorkspace
+  - SpringController
+  - OpenGripperForUser
+  - MoveObjectOnMobileBase (recovery)
+  - AskUserForHelp (recovery)
+  - Waiting
+"""
 
 import rclpy
 from rclpy.node import Node
-
 import smach
 import smach_ros
-
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
+from geometry_msgs.msg import Pose
+from bph_pickmeup_client import BphPickmeupClient
 
 
 # ---------------------------------------------------------------------------
-# State definitions
+# Shared userdata keys (passed between states via SMACH userdata)
+# ---------------------------------------------------------------------------
+# object_pose      : geometry_msgs/Pose  – current detected object pose
+# ee_plan          : object              – motion plan to object location
+# gripper_holding  : bool                – True if gripper has object
+# fail_count       : int                 – retry counter for workspace move
+# FAIL_LIMIT       : int                 – max retries before asking user
+
+
+FAIL_LIMIT = 3
+
+
+   
+
+# ---------------------------------------------------------------------------
+# States
 # ---------------------------------------------------------------------------
 
-class StateIdle(smach.State):
-    """Initial idle state. Waits for a trigger before transitioning."""
+class FindObjectLocation(smach.State):
+    """
+    Recovery / entry state.
+    Runs perception pipeline to localise the object.
+    Outputs: object_pose in userdata
+    """
 
     def __init__(self, node: Node):
         super().__init__(
-            outcomes=['start', 'abort'],
-            input_keys=['user_data_in'],
-            output_keys=['user_data_out'],
+            outcomes=['found', 'not_found'],
+            input_keys=[],
+            output_keys=['object_pose']
         )
         self._node = node
-        self._logger = node.get_logger()
+        
 
     def execute(self, userdata):
-        self._logger.info('Executing state: IDLE')
+        self._node.get_logger().info('[FindObjectLocation] Searching for object...')
+        # TODO: call your perception service here
+        # e.g. result = self._node.perception_client.call(...)
+        # Stub: assume found
+        userdata.object_pose = Pose()   # replace with real pose
+        self._node.get_logger().info('[FindObjectLocation] Object found.')
+        return 'found'
 
-        # FIXME: replace with real wait for message, actions, services
-        userdata.user_data_out = userdata.user_data_in
 
-        self._logger.info('IDLE -> transitioning to RUNNING')
-        return 'start'
-
-
-class StateRunning(smach.State):
-    """Active working state."""
+class ReadyToPickUpObject(smach.State):
+    """
+    Preconditions:
+      - object in arm workspace          (checked via userdata.object_pose)
+      - object location known            (object_pose must be set)
+    Action:
+      - send object pose to bph_pickmeup, receive motion plan
+    Transitions:
+      planned      -> MovingToPickUpObject
+      cannot_plan  -> MoveObjectOnMobileBase
+      no_precond   -> FindObjectLocation
+    """
 
     def __init__(self, node: Node):
         super().__init__(
-            outcomes=['success', 'failure', 'abort'],
-            input_keys=['user_data_in'],
-            output_keys=['user_data_out'],
+            outcomes=['planned', 'cannot_plan', 'no_precond'],
+            input_keys=['object_pose'],
+            output_keys=['ee_plan']
         )
         self._node = node
-        self._logger = node.get_logger()
+        self._bph_client = BphPickmeupClient(node)
 
     def execute(self, userdata):
-        self._logger.info('Executing state: RUNNING')
+        self._node.get_logger().info('[ReadyToPickUpObject] Checking preconditions...')
 
-        # FIXME: replace with real work (what do we do when the state triggers?)
-        success = True  # placeholder
+        # Precondition: object_pose must be populated
+        if not hasattr(userdata, 'object_pose') or userdata.object_pose is None:
+            self._node.get_logger().warn('[ReadyToPickUpObject] No object pose – precondition not met.')
+            return 'no_precond'
 
+        # TODO: check that object is actually in the arm workspace
+        object_in_workspace = True   # replace with real check
+        if not object_in_workspace:
+            self._node.get_logger().warn('[ReadyToPickUpObject] Object not in workspace.')
+            return 'no_precond'
+
+        self._node.get_logger().info('[ReadyToPickUpObject] Sending pose to bph_pickmeup...')
+        success, error_code = self._bph_client.send_goal(userdata.joint_angles)
         if success:
-            userdata.user_data_out = userdata.user_data_in
-            self._logger.info('RUNNING -> transitioning to SUCCESS')
-            return 'success'
+            self._node.get_logger().info('[ReadyToPickUpObject] Plan received.')
+            return 'planned'
         else:
-            self._logger.warn('RUNNING -> transitioning to FAILURE')
-            return 'failure'
+            self._node.get_logger().warn('[ReadyToPickUpObject] Cannot plan to location.')
+            userdata.ee_plan = None
+            self._node.get_logger().warn(f'[ReadyToPickUpObject] bph_pickmeup error code: {error_code}')
+            return 'cannot_plan'
 
 
-class StateSuccess(smach.State):
-    """Terminal success state."""
+class MovingToPickUpObject(smach.State):
+    """
+    Preconditions:
+      - object in arm workspace
+      - ee_plan is set
+    Action:
+      - execute motion plan, move EE to object location
+    Transitions:
+      at_object    -> PickUpObject
+      object_moved -> FindObjectLocation
+      ee_failed    -> ReadyToPickUpObject
+    """
+
+    def __init__(self, node: Node):
+        super().__init__(
+            outcomes=['at_object', 'object_moved', 'ee_failed'],
+            input_keys=['ee_plan', 'object_pose'],
+            output_keys=[]
+        )
+        self._node = node
+
+    def execute(self, userdata):
+        self._node.get_logger().info('[MovingToPickUpObject] Executing motion plan...')
+
+        # TODO: execute userdata.ee_plan via MoveIt or similar
+        # Stub outcomes – replace with real execution feedback
+        execution_result = 'success'   # 'success' | 'object_moved' | 'failed'
+
+        if execution_result == 'success':
+            self._node.get_logger().info('[MovingToPickUpObject] EE reached object location.')
+            return 'at_object'
+        elif execution_result == 'object_moved':
+            self._node.get_logger().warn('[MovingToPickUpObject] Object has moved.')
+            return 'object_moved'
+        else:
+            self._node.get_logger().warn('[MovingToPickUpObject] EE did not reach location.')
+            return 'ee_failed'
+
+
+class PickUpObject(smach.State):
+    """
+    Preconditions:
+      - object in arm workspace
+      - EE at gripping location
+    Action:
+      - close gripper
+    Transitions:
+      gripped      -> ObjectInGripperMoveToWorkspace
+      grip_failed  -> FindObjectLocation
+    """
+
+    def __init__(self, node: Node):
+        super().__init__(
+            outcomes=['gripped', 'grip_failed'],
+            input_keys=[],
+            output_keys=['gripper_holding']
+        )
+        self._node = node
+
+    def execute(self, userdata):
+        self._node.get_logger().info('[PickUpObject] Closing gripper...')
+
+        # TODO: call gripper close service / action
+        grip_success = True   # replace with real feedback
+
+        if grip_success:
+            userdata.gripper_holding = True
+            self._node.get_logger().info('[PickUpObject] Object gripped successfully.')
+            return 'gripped'
+        else:
+            userdata.gripper_holding = False
+            self._node.get_logger().warn('[PickUpObject] Grip failed.')
+            return 'grip_failed'
+
+
+class ObjectInGripperMoveToWorkspace(smach.State):
+    """
+    Precondition:
+      - gripper_holding == True
+    Action:
+      - plan and move to workspace location
+    Transitions:
+      at_workspace -> SpringController
+      retry        -> ObjectInGripperMoveToWorkspace   (increments fail_count)
+      ask_for_help -> AskUserForHelp                  (fail_count > FAIL_LIMIT)
+    """
+
+    def __init__(self, node: Node):
+        super().__init__(
+            outcomes=['at_workspace', 'retry', 'ask_for_help'],
+            input_keys=['gripper_holding', 'fail_count'],
+            output_keys=['fail_count']
+        )
+        self._node = node
+
+    def execute(self, userdata):
+        self._node.get_logger().info('[ObjectInGripperMoveToWorkspace] Planning to workspace...')
+
+        if not getattr(userdata, 'gripper_holding', False):
+            self._node.get_logger().error('[ObjectInGripperMoveToWorkspace] Gripper is not holding – precondition failure.')
+            userdata.fail_count = getattr(userdata, 'fail_count', 0) + 1
+            if userdata.fail_count > FAIL_LIMIT:
+                return 'ask_for_help'
+            return 'retry'
+
+        # TODO: plan to workspace pose via MoveIt or similar
+        plan_success = True   # replace with real result
+
+        if plan_success:
+            userdata.fail_count = 0
+            self._node.get_logger().info('[ObjectInGripperMoveToWorkspace] Reached workspace.')
+            return 'at_workspace'
+        else:
+            fail_count = getattr(userdata, 'fail_count', 0) + 1
+            userdata.fail_count = fail_count
+            self._node.get_logger().warn(
+                f'[ObjectInGripperMoveToWorkspace] Failed to reach workspace (attempt {fail_count}).'
+            )
+            if fail_count > FAIL_LIMIT:
+                return 'ask_for_help'
+            return 'retry'
+
+
+class SpringController(smach.State):
+    """
+    Preconditions:
+      - gripper_holding == True
+      - EE in workspace
+    Action:
+      - activate spring controller
+    Transitions:
+      hold_mode_requested  -> PositionHolding  (button pressed)
+      open_requested       -> OpenGripperForUser
+    """
+
+    def __init__(self, node: Node):
+        super().__init__(
+            outcomes=['hold_mode_requested', 'open_requested'],
+            input_keys=['gripper_holding'],
+            output_keys=[]
+        )
+        self._node = node
+        # Subscribe to operator button topics
+        self._hold_button = False
+        self._open_button = False
+        self._hold_sub = node.create_subscription(
+            Bool, '/operator/hold_button', self._hold_cb, 1
+        )
+        self._open_sub = node.create_subscription(
+            Bool, '/operator/open_gripper_button', self._open_cb, 1
+        )
+
+    def _hold_cb(self, msg: Bool):
+        if msg.data:
+            self._hold_button = True
+
+    def _open_cb(self, msg: Bool):
+        if msg.data:
+            self._open_button = True
+
+    def execute(self, userdata):
+        self._node.get_logger().info('[SpringController] Activating spring controller...')
+        # TODO: activate your spring controller here
+        self._hold_button = False
+        self._open_button = False
+
+        rate = self._node.create_rate(10)
+        while rclpy.ok():
+            rclpy.spin_once(self._node, timeout_sec=0.1)
+            if self._hold_button:
+                self._node.get_logger().info('[SpringController] Position-hold mode requested.')
+                return 'hold_mode_requested'
+            if self._open_button:
+                self._node.get_logger().info('[SpringController] Open gripper requested.')
+                return 'open_requested'
+
+
+class OpenGripperForUser(smach.State):
+    """
+    Preconditions:
+      - gripper_holding == True
+      - open_gripper button pressed
+    Action:
+      - open gripper when button pressed
+    Transitions:
+      opened -> Waiting
+    """
+
+    def __init__(self, node: Node):
+        super().__init__(
+            outcomes=['opened'],
+            input_keys=['gripper_holding'],
+            output_keys=['gripper_holding']
+        )
+        self._node = node
+        self._button_pressed = False
+        self._sub = node.create_subscription(
+            Bool, '/operator/open_gripper_button', self._button_cb, 1
+        )
+
+    def _button_cb(self, msg: Bool):
+        if msg.data:
+            self._button_pressed = True
+
+    def execute(self, userdata):
+        self._node.get_logger().info('[OpenGripperForUser] Waiting for open-gripper button press...')
+        self._button_pressed = False
+
+        while rclpy.ok():
+            rclpy.spin_once(self._node, timeout_sec=0.1)
+            if self._button_pressed:
+                # TODO: send open-gripper command to hardware
+                self._node.get_logger().info('[OpenGripperForUser] Gripper opened.')
+                userdata.gripper_holding = False
+                return 'opened'
+
+
+class MoveObjectOnMobileBase(smach.State):
+    """
+    Recovery: reposition the object using the mobile base so it falls
+    within arm workspace for planning.
+    Transitions:
+      repositioned -> ReadyToPickUpObject
+      failed       -> FindObjectLocation
+    """
+
+    def __init__(self, node: Node):
+        super().__init__(
+            outcomes=['repositioned', 'failed'],
+            input_keys=['object_pose'],
+            output_keys=['object_pose']
+        )
+        self._node = node
+
+    def execute(self, userdata):
+        self._node.get_logger().info('[MoveObjectOnMobileBase] Repositioning mobile base...')
+        # TODO: navigate mobile base so object enters arm workspace
+        success = True   # replace with real navigation result
+        if success:
+            self._node.get_logger().info('[MoveObjectOnMobileBase] Object now in workspace.')
+            return 'repositioned'
+        else:
+            self._node.get_logger().warn('[MoveObjectOnMobileBase] Repositioning failed.')
+            return 'failed'
+
+
+class AskUserForHelp(smach.State):
+    """
+    Recovery: notify the user and wait for manual intervention.
+    Transitions:
+      helped -> ObjectInGripperMoveToWorkspace
+    """
+
+    def __init__(self, node: Node):
+        super().__init__(
+            outcomes=['helped'],
+            input_keys=[],
+            output_keys=['fail_count']
+        )
+        self._node = node
+        self._help_received = False
+        self._sub = node.create_subscription(
+            Bool, '/operator/help_provided', self._help_cb, 1
+        )
+
+    def _help_cb(self, msg: Bool):
+        if msg.data:
+            self._help_received = True
+
+    def execute(self, userdata):
+        self._node.get_logger().warn(
+            '[AskUserForHelp] Manual intervention required. '
+            'Publish True to /operator/help_provided when ready.'
+        )
+        self._help_received = False
+        while rclpy.ok():
+            rclpy.spin_once(self._node, timeout_sec=0.1)
+            if self._help_received:
+                userdata.fail_count = 0
+                self._node.get_logger().info('[AskUserForHelp] User provided help, resuming.')
+                return 'helped'
+
+
+class Waiting(smach.State):
+    """
+    Idle/waiting state reached after object is released.
+    Waits for operator signal to start a new pick cycle.
+    Transitions:
+      restart -> FindObjectLocation
+    """
+
+    def __init__(self, node: Node):
+        super().__init__(
+            outcomes=['restart'],
+            input_keys=[],
+            output_keys=[]
+        )
+        self._node = node
+        self._restart = False
+        self._sub = node.create_subscription(
+            Bool, '/operator/start_pick', self._restart_cb, 1
+        )
+
+    def _restart_cb(self, msg: Bool):
+        if msg.data:
+            self._restart = True
+
+    def execute(self, userdata):
+        self._node.get_logger().info('[Waiting] Idle. Publish True to /operator/start_pick to restart.')
+        self._restart = False
+        while rclpy.ok():
+            rclpy.spin_once(self._node, timeout_sec=0.1)
+            if self._restart:
+                return 'restart'
+
+
+class PositionHolding(smach.State):
+    """
+    Holds EE position until further instruction.
+    Transitions:
+      done -> Waiting
+    """
 
     def __init__(self, node: Node):
         super().__init__(
             outcomes=['done'],
-            input_keys=['user_data_in'],
+            input_keys=[],
+            output_keys=[]
         )
         self._node = node
-        self._logger = node.get_logger()
 
     def execute(self, userdata):
-        self._logger.info('Executing state: SUCCESS')
-        # TODO: publish results, notify action server, etc.
+        self._node.get_logger().info('[PositionHolding] Holding position...')
+        # TODO: activate position hold controller
+        # Stub: just return done immediately
         return 'done'
 
 
-class StateFailure(smach.State):
-    """Terminal failure / error-handling state."""
-
-    def __init__(self, node: Node):
-        super().__init__(
-            outcomes=['retry', 'abort'],
-            input_keys=['user_data_in'],
-        )
-        self._node = node
-        self._logger = node.get_logger()
-        self._retry_count = 0
-        self._max_retries = 3
-
-    def execute(self, userdata):
-        self._logger.error('Executing state: FAILURE')
-        self._retry_count += 1
-
-        if self._retry_count <= self._max_retries:
-            self._logger.info(
-                f'Retrying ({self._retry_count}/{self._max_retries})'
-            )
-            return 'retry'
-
-        self._logger.error('Max retries reached, aborting.')
-        return 'abort'
-
-
 # ---------------------------------------------------------------------------
-# State machine builder
+# Build state machine
 # ---------------------------------------------------------------------------
 
-def build_state_machine(node: Node) -> smach.StateMachine:
-    """Construct and return the top-level state machine."""
+def build_sm(node: Node) -> smach.StateMachine:
+    sm = smach.StateMachine(outcomes=['shutdown'])
+    sm.userdata.object_pose = None
+    sm.userdata.ee_plan = None
+    sm.userdata.gripper_holding = False
+    sm.userdata.fail_count = 0
 
-    sm = smach.StateMachine(
-        outcomes=['succeeded', 'aborted'],
-        input_keys=[],
-        output_keys=[],
-    )
-
-    # Initialise userdata defaults
-    sm.userdata.user_data_in = None
-    sm.userdata.user_data_out = None
-
-#### temporary states, to be filled in later
     with sm:
         smach.StateMachine.add(
-            'IDLE',
-            StateIdle(node),
+            'FIND_OBJECT_LOCATION',
+            FindObjectLocation(node),
             transitions={
-                'start': 'RUNNING',
-                'abort': 'aborted',
-            },
-            remapping={
-                'user_data_in': 'user_data_in',
-                'user_data_out': 'user_data_out',
-            },
+                'found':     'READY_TO_PICK_UP_OBJECT',
+                'not_found': 'FIND_OBJECT_LOCATION',   # keep searching
+            }
         )
 
         smach.StateMachine.add(
-            'RUNNING',
-            StateRunning(node),
+            'READY_TO_PICK_UP_OBJECT',
+            ReadyToPickUpObject(node),
             transitions={
-                'success': 'SUCCESS',
-                'failure': 'FAILURE',
-                'abort': 'aborted',
-            },
-            remapping={
-                'user_data_in': 'user_data_out',
-                'user_data_out': 'user_data_out',
-            },
+                'planned':      'MOVING_TO_PICK_UP_OBJECT',
+                'cannot_plan':  'MOVE_OBJECT_ON_MOBILE_BASE',
+                'no_precond':   'FIND_OBJECT_LOCATION',
+            }
         )
 
         smach.StateMachine.add(
-            'SUCCESS',
-            StateSuccess(node),
+            'MOVING_TO_PICK_UP_OBJECT',
+            MovingToPickUpObject(node),
             transitions={
-                'done': 'succeeded',
-            },
-            remapping={
-                'user_data_in': 'user_data_out',
-            },
+                'at_object':    'PICK_UP_OBJECT',
+                'object_moved': 'FIND_OBJECT_LOCATION',
+                'ee_failed':    'READY_TO_PICK_UP_OBJECT',
+            }
         )
 
         smach.StateMachine.add(
-            'FAILURE',
-            StateFailure(node),
+            'PICK_UP_OBJECT',
+            PickUpObject(node),
             transitions={
-                'retry': 'RUNNING',
-                'abort': 'aborted',
-            },
-            remapping={
-                'user_data_in': 'user_data_out',
-            },
+                'gripped':    'OBJECT_IN_GRIPPER_MOVE_TO_WORKSPACE',
+                'grip_failed': 'FIND_OBJECT_LOCATION',
+            }
+        )
+
+        smach.StateMachine.add(
+            'OBJECT_IN_GRIPPER_MOVE_TO_WORKSPACE',
+            ObjectInGripperMoveToWorkspace(node),
+            transitions={
+                'at_workspace': 'SPRING_CONTROLLER',
+                'retry':        'OBJECT_IN_GRIPPER_MOVE_TO_WORKSPACE',
+                'ask_for_help': 'ASK_USER_FOR_HELP',
+            }
+        )
+
+        smach.StateMachine.add(
+            'SPRING_CONTROLLER',
+            SpringController(node),
+            transitions={
+                'hold_mode_requested': 'POSITION_HOLDING',
+                'open_requested':      'OPEN_GRIPPER_FOR_USER',
+            }
+        )
+
+        smach.StateMachine.add(
+            'OPEN_GRIPPER_FOR_USER',
+            OpenGripperForUser(node),
+            transitions={
+                'opened': 'WAITING',
+            }
+        )
+
+        smach.StateMachine.add(
+            'POSITION_HOLDING',
+            PositionHolding(node),
+            transitions={
+                'done': 'WAITING',
+            }
+        )
+
+        smach.StateMachine.add(
+            'WAITING',
+            Waiting(node),
+            transitions={
+                'restart': 'FIND_OBJECT_LOCATION',
+            }
+        )
+
+        smach.StateMachine.add(
+            'MOVE_OBJECT_ON_MOBILE_BASE',
+            MoveObjectOnMobileBase(node),
+            transitions={
+                'repositioned': 'READY_TO_PICK_UP_OBJECT',
+                'failed':       'FIND_OBJECT_LOCATION',
+            }
+        )
+
+        smach.StateMachine.add(
+            'ASK_USER_FOR_HELP',
+            AskUserForHelp(node),
+            transitions={
+                'helped': 'OBJECT_IN_GRIPPER_MOVE_TO_WORKSPACE',
+            }
         )
 
     return sm
 
 
 # ---------------------------------------------------------------------------
-# ROS 2 node wrapper
-# ---------------------------------------------------------------------------
-
-class SmachNode(Node):
-    """ROS 2 node that hosts a SMACH state machine."""
-
-    def __init__(self):
-        super().__init__('smach_node')
-
-        # Optional: declare / read parameters
-        self.declare_parameter('loop', False)
-        self._loop = self.get_parameter('loop').get_parameter_value().bool_value
-
-        # Optional: publisher for state-machine status
-        self._status_pub = self.create_publisher(String, '~/sm_status', 10)
-
-        # Build the state machine
-        self._sm = build_state_machine(self)
-
-        # Optional: SMACH introspection server (visualise in smach_viewer)
-        self._sis = smach_ros.IntrospectionServer(
-            'smach_introspection', self._sm, '/SM_ROOT'
-        )
-        self._sis.start()
-
-        self.get_logger().info('SmachNode initialised. Starting state machine.')
-        self._run_sm()
-
-    def _run_sm(self):
-        """Execute the state machine (blocking call on the node thread)."""
-        outcome = self._sm.execute()
-        self.get_logger().info(f'State machine finished with outcome: {outcome}')
-
-        # Publish final status
-        msg = String()
-        msg.data = outcome
-        self._status_pub.publish(msg)
-
-        if self._loop and outcome == 'succeeded':
-            self.get_logger().info('loop=true — restarting state machine.')
-            self._run_sm()
-
-    def destroy_node(self):
-        self._sis.stop()
-        super().destroy_node()
-
-
-# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
-def main(args=None):
-    rclpy.init(args=args)
-    node = SmachNode()
+def main():
+    rclpy.init()
+    node = Node('pick_place_sm_node')
+    node.get_logger().info('Starting pick-and-place state machine...')
+
+    sm = build_sm(node)
+
+    # Optional: launch introspection server for smach_viewer
+    sis = smach_ros.IntrospectionServer('pick_place_sm', sm, '/PICK_PLACE_SM')
+    sis.start()
 
     try:
-        rclpy.spin(node)
+        outcome = sm.execute()
+        node.get_logger().info(f'State machine terminated with outcome: {outcome}')
     except KeyboardInterrupt:
-        pass
+        node.get_logger().info('Interrupted.')
     finally:
+        sis.stop()
         node.destroy_node()
         rclpy.shutdown()
 

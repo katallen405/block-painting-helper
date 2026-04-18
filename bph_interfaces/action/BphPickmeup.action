@@ -1,0 +1,14 @@
+# Goal: where to move the end effector
+# Provide either joint_angles (6 values) OR a named position string.
+# If joint_angles is non-empty it takes precedence.
+float64[] joint_angles      # 6 joint angles in radians
+string    position_name     # human-readable label e.g. "pre_grasp"
+---
+# Result: returned when the action completes (success or failure)
+bool   success
+int32  error_code           # mirrors MoveItErrorCodes.val; 1 = SUCCESS
+string message
+---
+# Feedback: streamed while the action is running
+string current_state        # e.g. "planning", "executing", "replanning"
+float32 progress            # 0.0 – 1.0 rough estimate
