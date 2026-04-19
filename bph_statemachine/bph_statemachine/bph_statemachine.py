@@ -20,7 +20,7 @@ import smach
 import smach_ros
 from std_msgs.msg import Bool, String
 from geometry_msgs.msg import Pose
-from bph_pickmeup_client import BphPickmeupClient
+from bph_pickmeup import BphPickmeupClient
 
 
 # ---------------------------------------------------------------------------
@@ -68,52 +68,149 @@ class FindObjectLocation(smach.State):
         return 'found'
 
 
+import threading
+import rclpy
+from rclpy.action import ActionClient
+import smach
+from moveit_msgs.msg import MoveItErrorCodes
+
+from bph_interfaces.action import BphPickmeup   # your generated action
+
+
 class ReadyToPickUpObject(smach.State):
     """
-    Preconditions:
-      - object in arm workspace          (checked via userdata.object_pose)
-      - object location known            (object_pose must be set)
-    Action:
-      - send object pose to bph_pickmeup, receive motion plan
-    Transitions:
-      planned      -> MovingToPickUpObject
-      cannot_plan  -> MoveObjectOnMobileBase
-      no_precond   -> FindObjectLocation
+    Sends the object location to bph_pickmeup and transitions as soon as
+    a motion plan is confirmed — without waiting for execution to finish.
+
+    Outcomes
+    --------
+    planned      : a valid plan exists  → MovingToPickUpObject
+    cannot_plan  : MoveIt cannot plan   → MoveObjectOnMobileBase
+    no_precond   : missing precondition → FindObjectLocation
     """
 
-    def __init__(self, node: Node):
+    def __init__(self, node):
         super().__init__(
             outcomes=['planned', 'cannot_plan', 'no_precond'],
             input_keys=['object_pose'],
             output_keys=['ee_plan']
         )
         self._node = node
-        self._bph_client = BphPickmeupClient(node)
+
+        # Action client — created once, reused across executions
+        self._client = ActionClient(node, BphPickmeup, '/bph_pickmeup')
+        self._node.get_logger().info('Waiting for /bph_pickmeup...')
+        self._client.wait_for_server()
+        self._node.get_logger().info('/bph_pickmeup ready.')
+
+        # Shared state written by the feedback callback, read by execute()
+        self._feedback_state: str = ''
+        self._feedback_lock = threading.Lock()
+
+    # ------------------------------------------------------------------
+    # Feedback callback — called by the ROS executor on every feedback msg
+    # ------------------------------------------------------------------
+
+    def _on_feedback(self, feedback_msg):
+        """Stores the latest current_state string from the server."""
+        state = feedback_msg.feedback.current_state
+        with self._feedback_lock:
+            self._feedback_state = state
+        self._node.get_logger().debug(
+            f'[ReadyToPickUpObject] feedback: {state} '
+            f'({feedback_msg.feedback.progress * 100:.0f}%)'
+        )
+
+    # ------------------------------------------------------------------
+    # SMACH execute
+    # ------------------------------------------------------------------
 
     def execute(self, userdata):
         self._node.get_logger().info('[ReadyToPickUpObject] Checking preconditions...')
 
-        # Precondition: object_pose must be populated
-        if not hasattr(userdata, 'object_pose') or userdata.object_pose is None:
-            self._node.get_logger().warn('[ReadyToPickUpObject] No object pose – precondition not met.')
+        # ---- Precondition checks ----
+        if not getattr(userdata, 'object_pose', None):
+            self._node.get_logger().warn('[ReadyToPickUpObject] No object pose.')
             return 'no_precond'
 
-        # TODO: check that object is actually in the arm workspace
-        object_in_workspace = True   # replace with real check
+        object_in_workspace = True   # TODO: real workspace check
         if not object_in_workspace:
-            self._node.get_logger().warn('[ReadyToPickUpObject] Object not in workspace.')
             return 'no_precond'
 
-        self._node.get_logger().info('[ReadyToPickUpObject] Sending pose to bph_pickmeup...')
-        success, error_code = self._bph_client.send_goal(userdata.joint_angles)
-        if success:
-            self._node.get_logger().info('[ReadyToPickUpObject] Plan received.')
-            return 'planned'
-        else:
-            self._node.get_logger().warn('[ReadyToPickUpObject] Cannot plan to location.')
-            userdata.ee_plan = None
-            self._node.get_logger().warn(f'[ReadyToPickUpObject] bph_pickmeup error code: {error_code}')
+        # ---- Send goal with feedback callback ----
+        self._node.get_logger().info('[ReadyToPickUpObject] Sending goal to bph_pickmeup...')
+
+        with self._feedback_lock:
+            self._feedback_state = ''
+
+        goal = BphPickmeup.Goal()
+        # Use joint_angles or position_name depending on your convention:
+        # goal.joint_angles = userdata.object_pose   # if already joint angles
+        # goal.position_name = "pre_grasp"           # or a named position
+        goal.position_name = 'pre_grasp'             # example
+
+        send_future = self._client.send_goal_async(
+            goal,
+            feedback_callback=self._on_feedback,    # <-- registered here
+        )
+
+        # Wait only until the server *accepts* the goal (very fast)
+        rclpy.spin_until_future_complete(self._node, send_future)
+        goal_handle = send_future.result()
+
+        if not goal_handle.accepted:
+            self._node.get_logger().warn('[ReadyToPickUpObject] Goal rejected.')
             return 'cannot_plan'
+
+        # ---- Poll until we see planning feedback or a terminal state ----
+        #
+        # spin_once lets the executor deliver incoming feedback callbacks
+        # without blocking indefinitely.  We exit as soon as:
+        #   - feedback says planning is done  → 'planned'
+        #   - the action result arrives early (e.g. immediate failure) → handled below
+        #
+        rate = self._node.create_rate(20)   # 20 Hz poll
+
+        while rclpy.ok():
+            rclpy.spin_once(self._node, timeout_sec=0.05)
+
+            with self._feedback_lock:
+                current = self._feedback_state
+
+            self._node.get_logger().debug(
+                f'[ReadyToPickUpObject] polling, state={current!r}'
+            )
+
+            if current == 'planning_complete':
+                # Plan exists — transition NOW, before execution finishes.
+                # Store the goal_handle so MovingToPickUpObject can monitor it.
+                userdata.ee_plan = goal_handle
+                self._node.get_logger().info(
+                    '[ReadyToPickUpObject] Plan confirmed → transitioning.'
+                )
+                return 'planned'
+
+            if current == 'planning_failed':
+                self._node.get_logger().warn('[ReadyToPickUpObject] Planning failed.')
+                # Cancel the action so the server cleans up
+                goal_handle.cancel_goal_async()
+                return 'cannot_plan'
+
+            # If the action completed before we got a planning_complete feedback
+            # (shouldn't happen with a well-behaved server, but be safe)
+            if goal_handle.status in (
+                # rclpy action status codes
+                4,   # SUCCEEDED
+                5,   # CANCELED
+                6,   # ABORTED
+            ):
+                self._node.get_logger().warn(
+                    f'[ReadyToPickUpObject] Action ended prematurely, '
+                    f'status={goal_handle.status}'
+                )
+                return 'cannot_plan'
+
+        return 'cannot_plan'   
 
 
 class MovingToPickUpObject(smach.State):
