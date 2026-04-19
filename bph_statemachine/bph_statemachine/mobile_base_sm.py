@@ -7,16 +7,16 @@ Manages the mobile base (Turtlebot) independently of the arm SM.
 
 States
 ------
-  Waiting                 — idle, listening for fetch_object requests
+  Waiting                 — idle, listening for retrieve_object requests
   NavigatingToObject      — Nav2 goal active, monitoring progress
-  AwaitingConfirmation    — second fetch arrived mid-nav; waiting for user confirm
+  AwaitingConfirmation    — second retrieve arrived mid-nav; waiting for user confirm
   CancellingPreviousGoal  — confirmed; cancelling the active Nav2 goal
   WaitingForCancelAck     — waiting for Nav2 to acknowledge cancellation
   ObjectInRange           — base has arrived; publishes /object_available
 
 UI topics (inbound)
 -------------------
-  /ui/fetch_object            std_msgs/String   — object name to fetch
+  /ui/retrieve_object            std_msgs/String   — object name to retrieve
   /ui/confirmation_response   std_msgs/Bool     — True=confirm, False=deny
 
 Status topics (outbound)
@@ -82,14 +82,14 @@ class BaseInterface:
         self.node = node
 
         # ---- inbound ----
-        self._pending_fetch: str | None = None          # object name
+        self._pending_retrieve: str | None = None          # object name
         self._confirmation_response: bool | None = None
-        self._fetch_lock = threading.Lock()
+        self._retrieve_lock = threading.Lock()
         self._confirm_lock = threading.Lock()
 
         self.node.create_subscription(
-            String, '/ui/fetch_object',
-            self._fetch_cb, 10
+            String, '/ui/retrieve_object',
+            self._retrieve_cb, 10
         )
         self.node.create_subscription(
             Bool, '/ui/confirmation_response',
@@ -113,10 +113,10 @@ class BaseInterface:
 
     # ---- callbacks ----
 
-    def _fetch_cb(self, msg: String):
-        with self._fetch_lock:
-            self._pending_fetch = msg.data
-        self.node.get_logger().info(f'[BaseInterface] fetch_object received: {msg.data}')
+    def _retrieve_cb(self, msg: String):
+        with self._retrieve_lock:
+            self._pending_retrieve = msg.data
+        self.node.get_logger().info(f'[BaseInterface] retrieve_object received: {msg.data}')
 
     def _confirm_cb(self, msg: Bool):
         with self._confirm_lock:
@@ -127,11 +127,11 @@ class BaseInterface:
 
     # ---- helpers called by states ----
 
-    def pop_pending_fetch(self) -> str | None:
-        """Consume and return the pending fetch request, or None."""
-        with self._fetch_lock:
-            val = self._pending_fetch
-            self._pending_fetch = None
+    def pop_pending_retrieve(self) -> str | None:
+        """Consume and return the pending retrieve request, or None."""
+        with self._retrieve_lock:
+            val = self._pending_retrieve
+            self._pending_retrieve = None
             return val
 
     def pop_confirmation(self) -> bool | None:
@@ -142,9 +142,9 @@ class BaseInterface:
             return val
 
     def clear_pending(self):
-        """Discard any queued fetch or confirmation (used on state entry)."""
-        with self._fetch_lock:
-            self._pending_fetch = None
+        """Discard any queued retrieve or confirmation (used on state entry)."""
+        with self._retrieve_lock:
+            self._pending_retrieve = None
         with self._confirm_lock:
             self._confirmation_response = None
 
@@ -194,18 +194,18 @@ def _spin_tick(node: Node):
 
 class Waiting(smach.State):
     """
-    Idle state.  Blocks until a fetch_object message arrives, then resolves
+    Idle state.  Blocks until a retrieve_object message arrives, then resolves
     the object pose and transitions to NavigatingToObject.
 
     Outcomes
     --------
-    fetch_received   → NavigatingToObject
+    retrieve_received   → NavigatingToObject
     object_not_found → Waiting  (re-enter; UI notified via status topic)
     """
 
     def __init__(self, iface: BaseInterface):
         super().__init__(
-            outcomes=['fetch_received', 'object_not_found'],
+            outcomes=['retrieve_received', 'object_not_found'],
             input_keys=[],
             output_keys=['current_object', 'current_pose', 'pending_object', 'pending_pose']
         )
@@ -214,18 +214,18 @@ class Waiting(smach.State):
     def execute(self, userdata):
         self._iface.publish_status('waiting')
         self._iface.clear_pending()
-        self._iface.node.get_logger().info('[Waiting] Idle — waiting for fetch_object.')
+        self._iface.node.get_logger().info('[Waiting] Idle — waiting for retrieve_object.')
 
         for _ in _spin_tick(self._iface.node):
             if self.preempt_requested():
                 self.service_preempt()
                 return 'object_not_found'
 
-            name = self._iface.pop_pending_fetch()
+            name = self._iface.pop_pending_retrieve()
             if name is None:
                 continue
 
-            self._iface.node.get_logger().info(f'[Waiting] Fetch request: {name}')
+            self._iface.node.get_logger().info(f'[Waiting] retrieve request: {name}')
             pose = self._iface.resolve_object_pose(name)
             if pose is None:
                 self._iface.publish_status(f'object_not_found:{name}')
@@ -236,7 +236,7 @@ class Waiting(smach.State):
             userdata.current_pose   = pose
             userdata.pending_object = None
             userdata.pending_pose   = None
-            return 'fetch_received'
+            return 'retrieve_received'
 
         return 'object_not_found'
 
@@ -245,14 +245,14 @@ class NavigatingToObject(smach.State):
     """
     Sends a NavigateToPose goal and monitors it.
 
-    While navigating, listens for a second fetch_object request.
+    While navigating, listens for a second retrieve_object request.
     If one arrives, transitions to AwaitingConfirmation rather than
     ignoring it or silently rerouting.
 
     Outcomes
     --------
     arrived          → ObjectInRange
-    preempt_requested → AwaitingConfirmation   (second fetch received)
+    preempt_requested → AwaitingConfirmation   (second retrieve received)
     nav_failed       → Waiting
     """
 
@@ -322,19 +322,19 @@ class NavigatingToObject(smach.State):
                     )
                     return 'nav_failed'
 
-            # Check for a second fetch request
-            new_name = self._iface.pop_pending_fetch()
+            # Check for a second retrieve request
+            new_name = self._iface.pop_pending_retrieve()
             if new_name is not None:
                 new_pose = self._iface.resolve_object_pose(new_name)
                 if new_pose is None:
                     self._iface.publish_status(f'object_not_found:{new_name}')
                     self._iface.node.get_logger().warn(
-                        f'[NavigatingToObject] Second fetch for unknown object {new_name} — ignored.'
+                        f'[NavigatingToObject] Second retrieve for unknown object {new_name} — ignored.'
                     )
                     continue
 
                 self._iface.node.get_logger().info(
-                    f'[NavigatingToObject] Second fetch received: {new_name} — '
+                    f'[NavigatingToObject] Second retrieve received: {new_name} — '
                     f'requesting confirmation.'
                 )
                 userdata.pending_object = new_name
@@ -346,14 +346,14 @@ class NavigatingToObject(smach.State):
 
 class AwaitingConfirmation(smach.State):
     """
-    A second fetch arrived while navigating.  Asks the user whether to
+    A second retrieve arrived while navigating.  Asks the user whether to
     cancel the current goal and reroute.
 
     Publishes to /base/confirm_required and waits up to
     CONFIRMATION_TIMEOUT_SEC for a response on /ui/confirmation_response.
 
     While waiting:
-      - A *third* fetch request is rejected immediately with a status
+      - A *third* retrieve request is rejected immediately with a status
         message ("confirmation_already_pending").
       - The current Nav2 goal continues uninterrupted.
 
@@ -392,12 +392,12 @@ class AwaitingConfirmation(smach.State):
                 self.service_preempt()
                 return 'timed_out'
 
-            # Reject any further fetch requests that arrive while dialog is open
-            extra_fetch = self._iface.pop_pending_fetch()
-            if extra_fetch is not None:
+            # Reject any further retrieve requests that arrive while dialog is open
+            extra_retrieve = self._iface.pop_pending_retrieve()
+            if extra_retrieve is not None:
                 self._iface.publish_status('confirmation_already_pending')
                 self._iface.node.get_logger().warn(
-                    f'[AwaitingConfirmation] Third fetch for "{extra_fetch}" rejected '
+                    f'[AwaitingConfirmation] Third retrieve for "{extra_retrieve}" rejected '
                     f'— confirmation already pending.'
                 )
 
@@ -574,12 +574,12 @@ class ObjectInRange(smach.State):
     Outcomes
     --------
     pickup_complete → Waiting
-    new_fetch       → NavigatingToObject   (arm took too long; user sent new fetch)
+    new_retrieve       → NavigatingToObject   (arm took too long; user sent new retrieve)
     """
 
     def __init__(self, iface: BaseInterface):
         super().__init__(
-            outcomes=['pickup_complete', 'new_fetch'],
+            outcomes=['pickup_complete', 'new_retrieve'],
             input_keys=['current_object'],
             output_keys=['current_object', 'current_pose', 'pending_object', 'pending_pose']
         )
@@ -622,19 +622,19 @@ class ObjectInRange(smach.State):
                 userdata.pending_pose   = None
                 return 'pickup_complete'
 
-            # Allow a new fetch to pull the base away if the arm is taking too long
-            new_name = self._iface.pop_pending_fetch()
+            # Allow a new retrieve to pull the base away if the arm is taking too long
+            new_name = self._iface.pop_pending_retrieve()
             if new_name is not None:
                 new_pose = self._iface.resolve_object_pose(new_name)
                 if new_pose is not None:
                     self._iface.node.get_logger().info(
-                        f'[ObjectInRange] New fetch "{new_name}" received — departing.'
+                        f'[ObjectInRange] New retrieve "{new_name}" received — departing.'
                     )
                     userdata.current_object = new_name
                     userdata.current_pose   = new_pose
                     userdata.pending_object = None
                     userdata.pending_pose   = None
-                    return 'new_fetch'
+                    return 'new_retrieve'
 
         return 'pickup_complete'
 
@@ -658,7 +658,7 @@ def build_mobile_base_sm(iface: BaseInterface) -> smach.StateMachine:
             'WAITING',
             Waiting(iface),
             transitions={
-                'fetch_received':   'NAVIGATING_TO_OBJECT',
+                'retrieve_received':   'NAVIGATING_TO_OBJECT',
                 'object_not_found': 'WAITING',
             }
         )
@@ -706,7 +706,7 @@ def build_mobile_base_sm(iface: BaseInterface) -> smach.StateMachine:
             ObjectInRange(iface),
             transitions={
                 'pickup_complete': 'WAITING',
-                'new_fetch':       'NAVIGATING_TO_OBJECT',
+                'new_retrieve':       'NAVIGATING_TO_OBJECT',
             }
         )
 

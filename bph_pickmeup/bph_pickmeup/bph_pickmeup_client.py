@@ -1,20 +1,6 @@
 #!/usr/bin/env python3
 """
-bph_pickmeup client helper — drop this into your SMACH state machine.
-
-Replaces the stub send_to_bph_pickmeup() in pick_place_sm.py.
-
-Usage in ReadyToPickUpObject.execute():
-    from bph_pickmeup_client import BphPickmeupClient
-
-    # create once in __init__, pass the same node
-    self._bph_client = BphPickmeupClient(node)
-
-    # call in execute()
-    success, error_code = self._bph_client.send_goal(joint_angles)
-    if success:
-        return 'planned'
-    ...
+bph_pickmeup client helper 
 """
 
 import rclpy

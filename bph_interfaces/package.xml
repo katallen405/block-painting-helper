@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>bph_pickmeup_msgs</name>
+  <name>bph_interfaces</name>
   <version>0.0.0</version>
-  <description>Service definitions for bph_pickmeup</description>
+  <description>Service and action definitions for block painting helper</description>
   <maintainer email="katallen@gmail.com">Kat Allen</maintainer>
   <license>MIT</license>
 
