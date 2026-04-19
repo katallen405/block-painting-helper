@@ -20,7 +20,7 @@ import smach
 import smach_ros
 from std_msgs.msg import Bool, String
 from geometry_msgs.msg import Pose
-from bph_pickmeup import BphPickmeupClient
+from bph_pickmeup.bph_pickmeup_client import BphPickmeupClient
 
 
 # ---------------------------------------------------------------------------
