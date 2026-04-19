@@ -7,8 +7,9 @@ endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
-
+find_package(bph_interfaces REQUIRED)
 ament_python_install_package(bph_pickmeup)
+
 
 install(PROGRAMS
   scripts/bph_pickmeup_node

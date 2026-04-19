@@ -15,7 +15,7 @@
   <depend>moveit_msgs</depend>
   <depend>moveit_py</depend>
   <depend>shape_msgs</depend>
-  <depend>bph_pickmeup_msgs</depend>
+  <depend>bph_interfaces</depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
