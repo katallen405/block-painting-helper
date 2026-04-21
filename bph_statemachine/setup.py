@@ -20,7 +20,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'bph_statemachine_node = bph_statemachine.bph_statemachine:main',
+        'arm_sm_node = bph_statemachine.arm_sm:main',
+        'base_sm_node = bph_statemachine.mobile_base_sm:main',
         ],
     },
 )
