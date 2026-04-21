@@ -34,6 +34,9 @@ from bph_pickmeup import BphPickmeupClient
 
 
 FAIL_LIMIT = 3
+workspace_center = Pose()   # TODO: set workspace center pose
+pickup_position = Pose()    # TODO: set pre-grasp pose for pickup
+
 
 
    
@@ -74,7 +77,7 @@ from rclpy.action import ActionClient
 import smach
 from moveit_msgs.msg import MoveItErrorCodes
 
-from bph_interfaces.action import BphPickmeup   # your generated action
+from bph_interfaces.action import BphPickmeup   
 
 
 class ReadyToPickUpObject(smach.State):
@@ -100,7 +103,10 @@ class ReadyToPickUpObject(smach.State):
         # Action client — created once, reused across executions
         self._client = ActionClient(node, BphPickmeup, '/bph_pickmeup')
         self._node.get_logger().info('Waiting for /bph_pickmeup...')
-        self._client.wait_for_server()
+        if not self._client.wait_for_server(timeout_sec=5.0):
+            self._node.get_logger().warn(
+                '/bph_pickmeup not available — arm will wait until it appears'
+            )
         self._node.get_logger().info('/bph_pickmeup ready.')
 
         # Shared state written by the feedback callback, read by execute()
@@ -258,7 +264,7 @@ class PickUpObject(smach.State):
       - object in arm workspace
       - EE at gripping location
     Action:
-      - close gripper
+      - move toward object and close gripper
     Transitions:
       gripped      -> ObjectInGripperMoveToWorkspace
       grip_failed  -> FindObjectLocation
@@ -318,7 +324,8 @@ class ObjectInGripperMoveToWorkspace(smach.State):
                 return 'ask_for_help'
             return 'retry'
 
-        # TODO: plan to workspace pose via MoveIt or similar
+        bph_pickmeup_client = BphPickmeupClient(self._node)
+        success = bph_pickmeup_client.plan_to_position('workspace_center')
         plan_success = True   # replace with real result
 
         if plan_success:
