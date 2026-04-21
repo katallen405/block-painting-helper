@@ -105,7 +105,9 @@ class ArmInterface:
         # ---- bph_pickmeup action client ----
         self.pickmeup_client = ActionClient(node, BphPickmeup, '/bph_pickmeup')
         node.get_logger().info('Waiting for /bph_pickmeup...')
-        self.pickmeup_client.wait_for_server()
+        if not self.pickmeup_client.wait_for_server(timeout_sec=5.0):
+            node.get_logger().error('Failed to connect to /bph_pickmeup action server.')
+            raise RuntimeError('bph_pickmeup action server not available')
         node.get_logger().info('/bph_pickmeup ready.')
 
         # Active pickmeup goal handle — written by MoveToLocation states,
