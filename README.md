@@ -26,5 +26,5 @@ STATUS:
 - 23 March 2026:  initial implementation 2f38d12
 - 30 March 2026:  MoveIt and NavStack assignment b7e4767
 - 6 March 2026:  Perception Assignment 19c79af (including venv instructions)
-- 22 April 2026: SMACH assignment 
+- 22 April 2026: SMACH assignment 9d1622c
 
