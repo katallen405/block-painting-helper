@@ -15,11 +15,12 @@ setup(
     zip_safe=True,
     maintainer='Kat Allen',
     maintainer_email='kat.allen@tufts.edu',
-    description='SMACK state machine for block painting helper',
+    description='SMACH state machine for block painting helper',
     license='Apache-2.0',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'simple_sm_node = bph_statemachine.simplified_sm:main',
         'arm_sm_node = bph_statemachine.arm_sm:main',
         'base_sm_node = bph_statemachine.mobile_base_sm:main',
         ],
