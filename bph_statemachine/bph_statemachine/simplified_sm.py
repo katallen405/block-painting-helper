@@ -233,7 +233,7 @@ class WaitingForObject(_FetchState):
     def execute(self, userdata):
         self._node.get_logger().info("[WaitingForObject] Waiting for object to be loaded (/button) …")
         self._latch.reset()
-        sub = self._node.create_subscription(Bool, "/button", self._latch.callback, 10)
+        sub = self._node.create_subscription(String, "/button", self._latch.callback, 10)
         self._wait_for_latch()
         self._node.destroy_subscription(sub)
         self._node.get_logger().info("[WaitingForObject] Object loaded")
@@ -275,7 +275,9 @@ class LocatingObjectAndPeople(_FetchState):
 
     def execute(self, userdata):
         self._node.get_logger().info("[LocatingObjectAndPeople] Waiting for /object/location …")
-        # TODO: trigger perception pipeline here
+        # TODO: request locations of people to avoid
+        # TODO: request location of object to grasp
+        
         self._latch.reset()
         sub = self._node.create_subscription(String, "/object/location", self._latch.callback, 10)
         self._wait_for_latch()
@@ -323,7 +325,7 @@ class Grasping(_FetchState):
         self._node.get_logger().info("[Grasping] Closing gripper – waiting for confirmation (/button) …")
         # TODO: send gripper close command here
         self._latch.reset()
-        sub = self._node.create_subscription(Bool, "/button", self._latch.callback, 10)
+        sub = self._node.create_subscription(String, "/button", self._latch.callback, 10)
         self._wait_for_latch()
         self._node.destroy_subscription(sub)
         self._node.get_logger().info("[Grasping] Grasp confirmed")
