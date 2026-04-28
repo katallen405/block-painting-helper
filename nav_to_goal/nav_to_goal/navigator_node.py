@@ -10,9 +10,7 @@ Robot-agnostic Nav2 navigation node.
 - Reports progress via feedback and result callbacks
 
 Configuration (ROS parameters, all overridable at launch):
-  goal_x          (float, default  2.0)  : Goal X in map frame
-  goal_y          (float, default  1.0)  : Goal Y in map frame
-  goal_yaw        (float, default  0.0)  : Goal heading (radians)
+
   map_frame       (str,   default "map") : Fixed/map frame id
   robot_base_frame(str,   default "base_link") : Robot base frame id
   navigate_on_start (bool, default True) : Navigate immediately on startup
@@ -39,6 +37,9 @@ from geometry_msgs.msg import PoseStamped, Quaternion
 from nav2_msgs.action import NavigateToPose
 from nav_msgs.msg import OccupancyGrid
 from lifecycle_msgs.srv import GetState
+from bph_interfaces.srv import GoToLocation
+from std_msgs.msg import String
+
 
 
 def yaw_to_quaternion(yaw: float) -> Quaternion:
@@ -64,26 +65,21 @@ class NavigatorNode(Node):
 
     def __init__(self):
         super().__init__("navigator_node")
+        self._srv = self.create_service(GoToLocation, 'navigate_to', self._navigate_callback)
 
         # ── Parameters ────────────────────────────────────────────────────────
-        self.declare_parameter("goal_x", 2.0)
-        self.declare_parameter("goal_y", 1.0)
-        self.declare_parameter("goal_yaw", 0.0)
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("robot_base_frame", "base_link")
-        self.declare_parameter("navigate_on_start", True)
-
-        self._goal_x = self.get_parameter("goal_x").value
-        self._goal_y = self.get_parameter("goal_y").value
-        self._goal_yaw = self.get_parameter("goal_yaw").value
+        
         self._map_frame = self.get_parameter("map_frame").value
         self._robot_base_frame = self.get_parameter("robot_base_frame").value
-        self._navigate_on_start = self.get_parameter("navigate_on_start").value
 
         # ── State flags ───────────────────────────────────────────────────────
         self._map_received = False
         self._nav2_ready = False
         self._goal_sent = False
+        self._status_pub = self.create_publisher(String, '/navigation_status', 10)
+
 
         # ── Action client ─────────────────────────────────────────────────────
         self._nav_client = ActionClient(self, NavigateToPose, "navigate_to_pose")
@@ -160,34 +156,25 @@ class NavigatorNode(Node):
 
     # ── Goal sending ──────────────────────────────────────────────────────────
 
-    def _send_goal(self):
-        self._goal_sent = True
-        self._check_timer.cancel()
+    def _navigate_callback(self, request, response):
+        if not self._map_received:
+            response.accepted = False
+            response.message = "No map yet"
+            return response
+        if not self._nav2_ready:
+            self._nav2_ready = self._all_nav2_nodes_active()
+            if not self._nav2_ready:
+                response.accepted = False
+                response.message = "Nav2 not ready"
+                return response
 
-        self.get_logger().info(
-            f"Sending NavigateToPose goal → "
-            f"({self._goal_x:.2f}, {self._goal_y:.2f}) "
-            f"yaw={self._goal_yaw:.2f} rad"
-        )
-
-        if not self._nav_client.wait_for_server(timeout_sec=5.0):
-            self.get_logger().error("NavigateToPose action server not available!")
-            return
-
-        goal_msg = NavigateToPose.Goal()
-        pose = PoseStamped()
-        pose.header.frame_id = self._map_frame
-        pose.header.stamp = self.get_clock().now().to_msg()
-        pose.pose.position.x = self._goal_x
-        pose.pose.position.y = self._goal_y
-        pose.pose.position.z = 0.0
-        pose.pose.orientation = yaw_to_quaternion(self._goal_yaw)
-        goal_msg.pose = pose
-
-        send_future = self._nav_client.send_goal_async(
-            goal_msg, feedback_callback=self._feedback_callback
-        )
-        send_future.add_done_callback(self._goal_response_callback)
+        self._goal_x = request.x
+        self._goal_y = request.y
+        self._goal_yaw = request.yaw
+        self._send_goal()
+        response.accepted = True
+        response.message = f"Goal sent to ({request.x}, {request.y})"
+        return response
 
     def _goal_response_callback(self, future):
         goal_handle = future.result()
@@ -209,14 +196,21 @@ class NavigatorNode(Node):
     def _result_callback(self, future):
         result = future.result()
         status = result.status
+        msg = String()
+
         if status == GoalStatus.STATUS_SUCCEEDED:
             self.get_logger().info("🎉 Goal REACHED successfully!")
+            msg.data = f"SUCCEEDED:{self._goal_x},{self._goal_y}"
         elif status == GoalStatus.STATUS_CANCELED:
             self.get_logger().warn("Goal was CANCELED.")
+            msg.data = "CANCELED"
         elif status == GoalStatus.STATUS_ABORTED:
             self.get_logger().error("Goal ABORTED by Nav2.")
+            msg.data = "ABORTED"
         else:
             self.get_logger().warn(f"Goal ended with status code: {status}")
+            msg.data = f"STATUS_{status}"
+        self._status_pub.publish(msg)
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────

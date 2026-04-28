@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-Scaffold from Claude.ai to get the SMACH syntax correct
+Scaffold from Claude.ai to get the SMACH syntax right.
+
+
 States:
     Wait                    -> RetrievingObject        (on /button message)
     RetrievingObject        -> WaitingForObject         (when /turtlebot/location == "supply closet")
@@ -21,7 +23,8 @@ from std_msgs.msg import Bool, String
 
 import smach
 import smach_ros
-
+from bph_interfaces.srv import GoToLocation
+from bph_interfaces.srv import MoveToPose
 
 # ---------------------------------------------------------------------------
 # Helper: a simple latch that a subscriber callback can set
@@ -75,21 +78,23 @@ class RobotFetchNode(Node):
         # TODO: self.arm_goal_pub = self.create_publisher(...)
         # TODO: self.gripper_pub  = self.create_publisher(...)
 
-        # ------------------------------------------------------------------
-        # Timers — add periodic callbacks here
-        # ------------------------------------------------------------------
-        # TODO: self.status_timer = self.create_timer(1.0, self._status_cb)
 
         self.get_logger().info("RobotFetchNode initialised")
 
     # Convenience: read parameters in one place so states don't hard-code strings
     @property
     def home_location(self):
-        return self.get_parameter("home_location").get_parameter_value().string_value
+        x = self.get_parameter("home_location.x").get_parameter_value().double_value
+        y = self.get_parameter("home_location.y").get_parameter_value().double_value
+        yaw = self.get_parameter("home_location.yaw").get_parameter_value().double_value
+        return x, y, yaw
 
     @property
     def supply_closet_location(self):
-        return self.get_parameter("supply_closet_location").get_parameter_value().string_value
+        x = self.get_parameter("supply_closet_location.x").get_parameter_value().double_value
+        y = self.get_parameter("supply_closet_location.y").get_parameter_value().double_value
+        yaw = self.get_parameter("supply_closet_location.yaw").get_parameter_value().double_value
+        return x, y, yaw
 
     @property
     def grasp_position_name(self):
@@ -173,10 +178,10 @@ class _FetchState(smach.State):
         self._latch = _TopicLatch()
 
     def _wait_for_latch(self):
-        """Block until _latch.triggered is set by a subscriber callback."""
         rate = self._node.create_rate(10)
         while rclpy.ok() and not self._latch.triggered:
             rate.sleep()
+        return self._latch.last_message
 
 
 # ---------------------------------------------------------------------------
@@ -192,10 +197,11 @@ class Wait(_FetchState):
         self._node.get_logger().info("[Wait] Waiting for /button press …")
         self._latch.reset()
         sub = self._node.create_subscription(String, "/button", self._latch.callback, 10)
-        self._wait_for_latch()
-        self._node.destroy_subscription(sub)
-        self._node.get_logger().info("[Wait] Button pressed")
-        return "button_pressed"
+        msg = self._wait_for_latch()
+        if msg:
+            self._node.get_logger().info("[Wait] Button pressed")
+            self._node.destroy_subscription(sub)
+            return "button_pressed"
 
 
 # ---------------------------------------------------------------------------
@@ -205,6 +211,10 @@ class RetrievingObject(_FetchState):
     """Navigate toward the supply closet. Completes when location is confirmed."""
     def __init__(self, node: RobotFetchNode):
         super().__init__(node, outcomes=["at_supply_closet"])
+        self._nav_client = self.create_client(GoToLocation, 'navigate_to')
+        self._nav_client.wait_for_service(timeout_sec=5.0)
+        self.create_subscription(String, 'navigation_status', self._status_callback, 10)
+
 
     def _location_cb(self, msg):
         if msg.data == self._node.supply_closet_location:
@@ -212,13 +222,26 @@ class RetrievingObject(_FetchState):
 
     def execute(self, userdata):
         self._node.get_logger().info("[RetrievingObject] Navigating to supply closet …")
-        # TODO: send navigation goal here
+        request = GoToLocation.Request()
+        x, y, yaw = self.supply_closet_location()
+        request.x = x
+        request.y = y
+        request.yaw = yaw
+        future = self._nav_client.call_async(request)
+        future.add_done_callback(self._nav_response_callback)
+
+
         self._latch.reset()
         sub = self._node.create_subscription(String, "/turtlebot/location", self._location_cb, 10)
-        self._wait_for_latch()
-        self._node.destroy_subscription(sub)
-        self._node.get_logger().info("[RetrievingObject] Arrived at supply closet")
-        return "at_supply_closet"
+        msg = self._wait_for_latch()
+        if msg == "supply_closet":
+            self._node.get_logger().info("[RetrievingObject] Arrived at supply closet")
+            self._node.destroy_subscription(sub)
+            return "at_supply_closet"
+        else:
+            self._node.get_logger().warn("[RetrievingObject] Received unexpected location: %s" % msg)
+            self._node.destroy_subscription(sub)
+            return "nav_error" 
 
 
 # ---------------------------------------------------------------------------
@@ -255,13 +278,23 @@ class NavigatingHome(_FetchState):
 
     def execute(self, userdata):
         self._node.get_logger().info("[NavigatingHome] Navigating home …")
-        # TODO: send navigation goal here
+        request = GoToLocation.Request()
+        x, y, yaw = self.home_location()
+        request.x = x
+        request.y = y
+        request.yaw = yaw
         self._latch.reset()
         sub = self._node.create_subscription(String, "/turtlebot/location", self._location_cb, 10)
-        self._wait_for_latch()
-        self._node.destroy_subscription(sub)
-        self._node.get_logger().info("[NavigatingHome] Arrived home")
-        return "at_home"
+        msg = self._wait_for_latch()
+        if msg == "home":
+             self._node.get_logger().info("[NavigatingHome] Arrived at home")
+             self._node.destroy_subscription(sub)
+             return "at_home"
+        else:
+             self._node.get_logger().warn("[NavigatingHome] Received unexpected location: %s" % msg)
+             self._node.destroy_subscription(sub)
+             return "nav_error"
+
 
 
 # ---------------------------------------------------------------------------
@@ -303,13 +336,26 @@ class PickAndPlace(_FetchState):
 
     def execute(self, userdata):
         self._node.get_logger().info("[PickAndPlace] Moving arm to grasp position …")
-        # TODO: send arm goal here
+        request = MoveToPose.Request()
+        x, y, yaw = self.home_location()
+        request.target_pose = geometry_msgs/PoseStamped()
+        request.target_pose.pose.position.x = x
+        request.target_pose.pose.position.y = y
+        request.target_pose.pose.position.z = 0.0
+        request.target_pose.pose.orientation.z = yaw
+        request.arm_name = ""
+        request.end_effector_link = ""
         self._latch.reset()
         sub = self._node.create_subscription(String, "/arm/location", self._arm_cb, 10)
-        self._wait_for_latch()
-        self._node.destroy_subscription(sub)
-        self._node.get_logger().info("[PickAndPlace] Arm at grasp position")
-        return "arm_at_grasp_position"
+        msg = self._wait_for_latch()
+        if msg == "grasp position":
+            self._node.get_logger().info("[PickAndPlace] Arm at grasp position")
+            self._node.destroy_subscription(sub)
+            return "arm_at_grasp_position"
+        else:
+            self._node.get_logger().warn("[PickAndPlace] Received unexpected arm location: %s" % msg)   
+            self._node.destroy_subscription(sub)
+            return "arm_not_at_grasp_position"
 
 
 # ---------------------------------------------------------------------------
@@ -325,11 +371,12 @@ class Grasping(_FetchState):
         self._node.get_logger().info("[Grasping] Closing gripper – waiting for confirmation (/button) …")
         # TODO: send gripper close command here
         self._latch.reset()
-        sub = self._node.create_subscription(String, "/button", self._latch.callback, 10)
-        self._wait_for_latch()
-        self._node.destroy_subscription(sub)
-        self._node.get_logger().info("[Grasping] Grasp confirmed")
-        return "grasp_confirmed"
+        sub = self._node.create_subscription(Bool, "/button", self._latch.callback, 10)
+        msg = self._wait_for_latch()
+        if msg:
+            self._node.get_logger().info("[Grasping] Grasp confirmed")
+            self._node.destroy_subscription(sub)
+            return "grasp_confirmed"
 
 
 # ---------------------------------------------------------------------------
@@ -350,10 +397,11 @@ class MoveToWorkspace(_FetchState):
         # TODO: send arm goal here
         self._latch.reset()
         sub = self._node.create_subscription(String, "/arm/location", self._arm_cb, 10)
-        self._wait_for_latch()
-        self._node.destroy_subscription(sub)
-        self._node.get_logger().info("[MoveToWorkspace] Arm in workspace – handing off to SpringController")
-        return "in_workspace"
+        msg = self._wait_for_latch()
+        if msg == "workspace position":
+            self._node.destroy_subscription(sub)
+            self._node.get_logger().info("[MoveToWorkspace] Arm in workspace – handing off to SpringController")
+            return "in_workspace"
 
 
 # ---------------------------------------------------------------------------
