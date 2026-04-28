@@ -23,7 +23,6 @@ Minimum external requirements
     the costmap — no topic wiring is done here; that lives in the Nav2
     parameter YAML (see config/nav2_params.yaml).
 """
-
 import math
 import time
 
