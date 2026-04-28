@@ -11,6 +11,7 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', ['launch/demo.launch.py']),
+        ('share/' + package_name + '/launch', ['launch/spring_control.launch.py']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -22,8 +23,6 @@ setup(
     entry_points={
         'console_scripts': [
             'simple_sm_node = bph_statemachine.simplified_sm:main',
-        'arm_sm_node = bph_statemachine.arm_sm:main',
-        'base_sm_node = bph_statemachine.mobile_base_sm:main',
         ],
     },
 )

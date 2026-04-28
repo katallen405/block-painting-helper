@@ -1,0 +1,12 @@
+Launch file bph_statemachine demo.launch.py needs to start
+- python3 sandbox/src/block-painting-helper/nav_to_goal/nav_to_goal/turtlebot_bridge.py
+  - this also needs to be a rosrun, register with package
+- all the springcontroller stuff
+
+- bph_statemachine needs to somehow swap the ros2 control from position control to effort control for the UR3e when the arm is given a nav_to_goal command
+
+Already in demo.launch.py:
+  1. nav_to_goal/bringup  — depth->scan, slam_toolbox, Nav2, navigator_node
+  2. person_tracker       — camera, static TF, person tracker, top-down viz
+  3. simple_sm_node       — top-level SMACH state machine
+  4. bph_pickmeup_node    — arm pick-and-place action server
