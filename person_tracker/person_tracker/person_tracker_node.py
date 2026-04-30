@@ -55,7 +55,7 @@ try:
     from ultralytics import YOLO
 except ImportError:
     raise ImportError(
-        "ultralytics is not installed. Run: pip install ultralytics"
+        "ultralytics is not found, export PYTHONPATH=$VIRTUAL_ENV/lib/python3.12/site-packages:$PYTHONPATH"
     )
 
 
@@ -123,7 +123,8 @@ class PersonTrackerNode(Node):
         self.declare_parameter("publish_viz",   True)
         self.declare_parameter("depth_enabled", False)
         self.declare_parameter("zones",         "{}")
-
+        self.declare_parameter("image_topic", "/bph_overhead_camera/image_raw")
+        
         self.model_path    = self.get_parameter("model_path").value
         self.confidence    = self.get_parameter("confidence").value
         self.device        = self.get_parameter("device").value
@@ -152,11 +153,19 @@ class PersonTrackerNode(Node):
         )
 
         # ---- Subscriptions -----------------------------------------------
-        self.image_sub = self.create_subscription(
-            Image, "/camera/color/image_raw",
-            self.image_callback, sensor_qos,
-        )
+ #       self.image_sub = self.create_subscription(
+ #           Image, "/camera/color/image_raw",
+ #           self.image_callback, sensor_qos,
+ #       )
 
+        image_topic = self.get_parameter("image_topic").get_parameter_value().string_value
+        self.image_sub = self.create_subscription(
+            Image,
+            image_topic,
+            self.image_callback,
+            sensor_qos,
+        )
+        
         self.depth_image: np.ndarray | None = None
         self.camera_info: CameraInfo | None = None
         self._depth_lock = threading.Lock()
