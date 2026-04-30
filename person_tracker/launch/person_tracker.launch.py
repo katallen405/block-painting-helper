@@ -1,5 +1,5 @@
 """
-person_tracker.launch.py
+Person_tracker.launch.py
 Launch the camera, static TF, person tracker, and top-down visualizer.
 
 Usage:
@@ -13,6 +13,7 @@ Camera transform parameters (camera_link relative to map frame):
   cam_roll  (float) Roll  in radians.            Default: 0.0
   cam_pitch (float) Pitch in radians (tilt down: positive values). Default: 1.5708 (90deg, straight down)
   cam_yaw   (float) Yaw   in radians.            Default: 0.0
+  image_topic (string) Topic from the camera.    Default: /camera/color/image_raw
 """
 
 from launch import LaunchDescription
@@ -52,13 +53,20 @@ def generate_launch_description():
                         description="Camera tilt in radians (pi/2 = straight down)")
     cam_yaw_arg   = DeclareLaunchArgument("cam_yaw",   default_value="0.0")
 
+    # ---- Image topic arg -------------------#
+    image_topic_arg = DeclareLaunchArgument(
+        "image_topic",
+        default_value="/camera/color/image_raw",
+        description="Camera color image topic",
+    )
+
     # ---- Nodes -----------------------------------------------------------
     static_tf_node = Node(
         package="tf2_ros",
         executable="static_transform_publisher",
         name="camera_tf",
         # args order: x y z yaw pitch roll parent_frame child_frame
-        arguments=[
+        arguments=[                           
             LaunchConfiguration("cam_x"),
             LaunchConfiguration("cam_y"),
             LaunchConfiguration("cam_z"),
@@ -70,19 +78,19 @@ def generate_launch_description():
         ],
     )
 
-    camera_node = Node(
-        package="v4l2_camera",
-        executable="v4l2_camera_node",
-        name="camera",
-        parameters=[{
-            "video_device": "/dev/video0",
-            "image_size": [640, 480],
-            "camera_frame_id": "camera_link",
-        }],
-        remappings=[
-            ("/image_raw", "/camera/color/image_raw"),
-        ],
-    )
+#    camera_node = Node(
+#        package="v4l2_camera",
+#        executable="v4l2_camera_node",
+#        name="camera",
+#        parameters=[{
+#            "video_device": "/dev/video0",
+#            "image_size": [640, 480],
+#            "camera_frame_id": "camera_link",
+#        }],
+#        remappings=[
+#            ("/image_raw", "/camera/color/image_raw"),
+#        ],
+#    )
 
     tracker_node = Node(
         package="person_tracker",
@@ -97,7 +105,10 @@ def generate_launch_description():
         executable="topdown_viz_node",
         name="topdown_viz",
         output="screen",
-        parameters=[LaunchConfiguration("config")],
+        parameters=[                          
+            LaunchConfiguration("config"),
+            {"image_topic": LaunchConfiguration("image_topic")},
+        ],
         condition=IfCondition(LaunchConfiguration("viz")),
     )
 
@@ -106,8 +117,9 @@ def generate_launch_description():
         viz_arg,
         cam_x_arg, cam_y_arg, cam_z_arg,
         cam_roll_arg, cam_pitch_arg, cam_yaw_arg,
+        image_topic_arg,                      
         static_tf_node,
-        camera_node,
+ #       camera_node, # started separately
         tracker_node,
         viz_node,
     ])

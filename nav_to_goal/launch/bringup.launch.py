@@ -22,8 +22,8 @@ Key arguments (all optional):
 
 Example – TurtleBot4:
   ros2 launch nav_to_goal bringup.launch.py \
-      depth_image_topic:=/oakd/rgb/preview/depth \
-      robot_base_frame:=base_link \
+      depth_image_topic:=/astra/rgb/preview/depth \
+      robot_base_frame:=tb_base_link \
       goal_x:=3.0 goal_y:=2.0
 """
 
@@ -77,7 +77,7 @@ def generate_launch_description():
         description="CameraInfo topic for the depth camera"
     )
     robot_base_frame_arg = DeclareLaunchArgument(
-        "robot_base_frame", default_value="base_link"
+        "robot_base_frame", default_value="turtlebot/base_link"
     )
 
     use_sim_time = LaunchConfiguration("use_sim_time")
@@ -94,7 +94,7 @@ def generate_launch_description():
             "range_min": 0.15,
             "range_max": 3.5,
             "scan_height": 5,        # rows to collapse into the scan
-            "output_frame": "base_link",  # overridden per robot if needed
+            "output_frame": "turtlebot/base_link",  # overridden per robot if needed
             "use_sim_time": use_sim_time,
         }],
         remappings=[

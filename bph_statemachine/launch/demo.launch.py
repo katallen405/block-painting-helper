@@ -30,16 +30,13 @@ Key arguments (all optional):
   torque_topic      : str    (default /virtual_spring_node/joint_torques)
   command_topic     : str    (default /forward_effort_controller/commands)
 
-  color_image_topic : str    (default /image_raw)
+  color_image_topic : str    (default /bph_overhead/camera/image_raw)
     RGB topic fed to the colour-picker; should come from the same overhead
     camera used by person_tracker.
-  target_color      : str    (default red)
-    HSV colour target the picker looks for on start-up.  The state machine
-    can override this at runtime via the ~/set_target_color service.
 
 Example:
   ros2 launch bph_statemachine demo.launch.py use_sim_time:=false
-  ros2 launch bph_statemachine demo.launch.py cam_z:=2.0 target_color:=blue
+  ros2 launch bph_statemachine demo.launch.py cam_z:=2.0 
 """
 
 import math
@@ -56,6 +53,7 @@ from launch.actions import (
 )
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
+from launch.substitutions import EnvironmentVariable, PathJoinSubstitution
 from launch_ros.actions import Node
 
 
@@ -92,13 +90,13 @@ def generate_launch_description():
         description="slam_toolbox parameter YAML",
     )
     depth_image_topic_arg = DeclareLaunchArgument(
-        "depth_image_topic", default_value="/camera/depth/image_raw",
+        "depth_image_topic", default_value="/tb-camera/depth/image_raw",
     )
     depth_info_topic_arg = DeclareLaunchArgument(
-        "depth_info_topic", default_value="/camera/depth/camera_info",
+        "depth_info_topic", default_value="/tb-camera/depth/camera_info",
     )
     robot_base_frame_arg = DeclareLaunchArgument(
-        "robot_base_frame", default_value="base_link",
+        "robot_base_frame", default_value="turtlebot/base_link",
     )
 
     # ── Overhead camera pose args ────────────────────────────────────────────
@@ -117,19 +115,28 @@ def generate_launch_description():
         default_value="10.3.4.10",
         description="IP address of the UR3e robot.",
     )
+    kinematics_params = DeclareLaunchArgument(
+        "kinematics_params",
+        default_value="home/katallen/my_robot_calibration.yaml",
+        description="Kinematics Calibration file made from ros2 launch ur_calibration calibration_correction.launch.py",
+        )
     launch_rviz_arg = DeclareLaunchArgument(
         "launch_rviz",
         default_value="false",
         description="Whether to launch RViz alongside the UR driver.",
     )
+
+
+
     urdf_path_arg = DeclareLaunchArgument(
         "urdf_path",
-        default_value=(
-            "/home/katallen/workspace/src/springcontroller/"
-            "springcontroller/flat_urdf_files/ceeorobot_flat.urdf"
-        ),
+        default_value=PathJoinSubstitution([
+            EnvironmentVariable("ROS_WS", default_value="/home/katallen/sandbox"),
+            "src/springcontroller/springcontroller/flat_urdf_files/ceeorobot_flat.urdf"
+    ]),
         description="Absolute path to the URDF used by the virtual spring node.",
     )
+
     joint_order_arg = DeclareLaunchArgument(
         "joint_order",
         default_value=(
@@ -152,18 +159,10 @@ def generate_launch_description():
     # ── Colour-picker args ───────────────────────────────────────────────────
     color_image_topic_arg = DeclareLaunchArgument(
         "color_image_topic",
-        default_value="/camera/color/image_raw",
+        default_value="/bph_overhead_camera/image_raw",
         description=(
             "RGB image topic for the colour-picker node.  "
             "Should be the same physical camera used by person_tracker."
-        ),
-    )
-    target_color_arg = DeclareLaunchArgument(
-        "target_color",
-        default_value="red",
-        description=(
-            "Start-up colour target ('red', 'green', 'blue', …).  "
-            "The state machine can override this via ~/set_target_color."
         ),
     )
 
@@ -205,6 +204,7 @@ def generate_launch_description():
             "cam_roll":  LaunchConfiguration("cam_roll"),
             "cam_pitch": LaunchConfiguration("cam_pitch"),
             "cam_yaw":   LaunchConfiguration("cam_yaw"),
+            "image_topic": LaunchConfiguration("image_topic"),
         }.items(),
     )
 
@@ -240,6 +240,7 @@ def generate_launch_description():
             "joint_order":   LaunchConfiguration("joint_order"),
             "torque_topic":  LaunchConfiguration("torque_topic"),
             "command_topic": LaunchConfiguration("command_topic"),
+            "kinematics_params": LaunchConfiguration("kinematics_arg")
         }.items(),
     )
 
@@ -255,12 +256,11 @@ def generate_launch_description():
     #
     color_picker_node = Node(
         package="bph_perception",
-        executable="color_picker_node",
+        executable="color_picker",
         name="color_picker",
         output="screen",
         parameters=[{
             "color_image_topic": LaunchConfiguration("color_image_topic"),
-             "target_color":      LaunchConfiguration("target_color"),
         }],
     )
 
@@ -277,12 +277,12 @@ def generate_launch_description():
         cam_roll_arg, cam_pitch_arg, cam_yaw_arg,
         robot_ip_arg,
         launch_rviz_arg,
+        kinematics_params,
         urdf_path_arg,
         joint_order_arg,
         torque_topic_arg,
         command_topic_arg,
         color_image_topic_arg,
-        target_color_arg,
 
         # start nodes / sub-launches
         LogInfo(msg="[demo] Starting ROSBridge ..."),
@@ -303,9 +303,8 @@ def generate_launch_description():
         LogInfo(msg="[demo] Starting UR3e arm + spring controller ..."),
         arm_bringup,
 
-        LogInfo(msg="[demo] Check that v4l2_camera is loaded and press enter..."),
+        LogInfo(msg="[demo] Check that v4l2_camera is loaded..."),
         #camera_bringup,
-        input(),
 
         LogInfo(msg="[demo] Starting colour-picker perception node ..."),
         color_picker_node,

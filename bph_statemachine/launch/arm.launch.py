@@ -51,6 +51,13 @@ def generate_launch_description():
         description="Output topic sent to the effort controller (std_msgs/Float64MultiArray).",
     )
 
+    kinematics_params = DeclareLaunchArgument(
+        "kinematics_params",
+        default_value="home/katallen/my_robot_calibration.yaml",
+        description="Kinematics Calibration file made from ros2 launch ur_calibration calibration_correction.launch.py",
+        )
+        
+    
     # ---------------------------------------------------------------------------
     # UR3e robot driver (included launch file)
     # ---------------------------------------------------------------------------
@@ -65,6 +72,7 @@ def generate_launch_description():
         launch_arguments={
             "robot_ip":    LaunchConfiguration("robot_ip"),
             "launch_rviz": LaunchConfiguration("launch_rviz"),
+            "kinematics_params": LaunchConfiguration("kinematics_params")
         }.items(),
     )
 
@@ -111,6 +119,7 @@ def generate_launch_description():
         joint_order_arg,
         torque_topic_arg,
         command_topic_arg,
+        kinematics_params,
         # nodes / included launches
         ur_driver,
         virtual_spring_node,
