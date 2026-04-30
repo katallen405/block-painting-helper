@@ -9,7 +9,8 @@ Launches the full block-painting-helper demo stack:
   3. simple_sm_node      — top-level SMACH state machine
   4. bph_pickmeup_node   — arm pick-and-place action server
   5. arm.launch.py       — UR3e driver + virtual spring controller + torque relay
-  5.5 overhead webcam - v4l2_camera camera node publishing on /image_raw 
+  5.5 overhead webcam - v4l2_camera camera node publishing on /image_raw
+                         currently loaded separately from different computer
   6. color_picker_node   — overhead-camera colour-based object localisation
 
 Key arguments (all optional):
@@ -241,21 +242,6 @@ def generate_launch_description():
             "command_topic": LaunchConfiguration("command_topic"),
         }.items(),
     )
-    # 5.5 camera node
-    # publishes to /image_raw
-    # used by both color_picker and person_finder
-    
-    camera_bringup = Node(
-        package = "v4l2_camera"
-        executable = "v4l2_camera_node"
-        name = "overhead_camera"
-        output = "screen"
-        parameters=[{'video_device': '/dev/video0'}],
-        remappings=[
-            ('/image_raw', '/bph_overhead_camera/image_raw'),
-            ('/camera_info', '/bph_overhead_camera/camera_info')
-            ]
-        )
 
     
     # ── 6. Colour-based object picker (perception) ───────────────────────────
@@ -280,7 +266,6 @@ def generate_launch_description():
 
     return LaunchDescription([
         set_pythonpath,             # must come first
-
         # declare all args
         use_sim_time_arg,
         params_file_arg,
@@ -318,8 +303,9 @@ def generate_launch_description():
         LogInfo(msg="[demo] Starting UR3e arm + spring controller ..."),
         arm_bringup,
 
-        LogInfo(msg="[demo] Starting overhead webcam v4l2_camera ..."),
-        camera_bringup,
+        LogInfo(msg="[demo] Check that v4l2_camera is loaded and press enter..."),
+        #camera_bringup,
+        input(),
 
         LogInfo(msg="[demo] Starting colour-picker perception node ..."),
         color_picker_node,

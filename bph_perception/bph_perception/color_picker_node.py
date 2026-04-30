@@ -139,7 +139,7 @@ COLOR_PROFILES: dict[str, ColorProfile] = {
             HsvRange.make( 15,  36,  57,  30, 141, 173),
         ],
         debug_bgr=(0, 165, 255),  # orange so it stands out on the debug image
-        min_contour_area=1500,    # low saturation → noisy; require larger blobs
+        min_contour_area=15,    # low saturation → noisy; require larger blobs
     ),
 }
 
@@ -158,7 +158,7 @@ class ColorPickerNode(Node):
         self.declare_parameter("cam_info_topic",    "/bph_overhead_camera/camera_info")
         self.declare_parameter("cam_z",             2.5)
         self.declare_parameter("object_height_m",   0.5) #FIXME -turtlebot deck height
-        self.declare_parameter("min_contour_area",  500)
+        self.declare_parameter("min_contour_area",  5)
 
         self._color_topic: str   = self.get_parameter("color_image_topic").value
         self._info_topic:  str   = self.get_parameter("cam_info_topic").value
@@ -282,7 +282,15 @@ class ColorPickerNode(Node):
 
         response.success = True
         response.message = f"Found '{request.color}'"
-        response.pose    = pose
+        response.pose.header.frame_id = pose.header.frame_id
+        response.pose.header.stamp    = pose.header.stamp
+        response.pose.pose.position.x = pose.pose.position.x
+        response.pose.pose.position.y = pose.pose.position.y
+        response.pose.pose.position.z = pose.pose.position.z
+        response.pose.pose.orientation.x = pose.pose.orientation.x
+        response.pose.pose.orientation.y = pose.pose.orientation.y
+        response.pose.pose.orientation.z = pose.pose.orientation.z
+        response.pose.pose.orientation.w = pose.pose.orientation.w
         return response
 
     # ─────────────────────────────────────────────────────────────────────────

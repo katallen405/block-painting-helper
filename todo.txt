@@ -1,16 +1,14 @@
-- add launching camera to demo.launch.py
+
 (stretch)- get UI have pictures of blocks which send colors to color_picker_node via statemachine
 (stretch)- get UI to make webpage to show which block is wanted?
 - check how arm works with moveit - what needs to be launched?
 - measure turtlebot height
 - measure turtlebot and supply closet positions
-- calibrate camera
-ros2 run camera_calibration cameracalibrator --size 7x9 --square 0.02 --ros-args -r image:=/bph_overhead_camera/image_raw
 
 
 
-
-Already in demo.launch.py:
+DONE
+- add launching camera to demo.launch.py (nope, has to be done on local machine)
 0 turtlebridge
 1. nav_to_goal/bringup  — depth->scan, slam_toolbox, Nav2, navigator_node
   2. person_tracker       — camera, static TF, person tracker, top-down viz
@@ -18,3 +16,5 @@ Already in demo.launch.py:
   4. bph_pickmeup_node    — arm pick-and-place action server
   
 - bph_statemachine can swap between position controller and effort controller when appropriate
+- calibrate camera
+ros2 run camera_calibration cameracalibrator --size 7x9 --square 0.02 --ros-args -r image:=/bph_overhead_camera/image_raw
