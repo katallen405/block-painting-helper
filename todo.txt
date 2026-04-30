@@ -1,7 +1,17 @@
+ ros2 launch nav2_bringup navigation_launch.py   use_sim_time:=false   params_file:=/home/katallen/sandbox/src/block-painting-helper/hayley-nav2/nav2_params.yaml
 
+ros2 run nav_to_goal turtlebot_bridge 
+
+ros2 launch slam_toolbox online_async_launch.py use_sim_time:=False
+
+
+
+- Throw out nav2 node and replace with the one that works from the docs
+- Actually launch moveit in launch file
+- check how arm works with moveit - what needs to be launched?
 (stretch)- get UI have pictures of blocks which send colors to color_picker_node via statemachine
 (stretch)- get UI to make webpage to show which block is wanted?
-- check how arm works with moveit - what needs to be launched?
+
 - measure turtlebot height
 - measure turtlebot and supply closet positions
 

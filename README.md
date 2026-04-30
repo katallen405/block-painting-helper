@@ -39,7 +39,7 @@ In this repository but not run here:
   (This also goes in the launch file, but is needed for debug)
 
 # Running details
-  ssh into the Turtlebot laptop:
+  ssh into the Turtlebot laptop FROM THE MAIN ROS MACHINE:
   cd into wherever you copied the bringup script and run:
   ros2 launch turtlebot_bringup.launch.py
 
@@ -47,7 +47,8 @@ On your machine local to the camera:
 ros2 run v4l2_camera v4l2_camera_node  --ros-args -r image_raw:=/bph_overhead_camera/image_raw -r video_device:='/dev/video0'
 
 On your static computer:
-  To enable rosbridge safely across the local network:
+    source ~/.ros_venv/bin/activate
+To enable rosbridge safely across the local network:
      ssh -L 9090:localhost:9090 baymax@10.5.10.74 (check this IP)
   To start everything else:
      ros2 launch bph_statemachine demo.launch.py
