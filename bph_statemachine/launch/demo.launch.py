@@ -117,7 +117,7 @@ def generate_launch_description():
     )
     kinematics_params = DeclareLaunchArgument(
         "kinematics_params",
-        default_value="home/katallen/my_robot_calibration.yaml",
+        default_value="/home/katallen/my_robot_calibration.yaml",
         description="Kinematics Calibration file made from ros2 launch ur_calibration calibration_correction.launch.py",
         )
     launch_rviz_arg = DeclareLaunchArgument(
@@ -136,6 +136,20 @@ def generate_launch_description():
     ]),
         description="Absolute path to the URDF used by the virtual spring node.",
     )
+
+    use_fake_hardware_arg = DeclareLaunchArgument(
+        "use_fake_hardware",
+        default_value="true",
+        description="Use fake hardware for UR arm",
+    )
+    
+    springconfig_arg = DeclareLaunchArgument(
+        "springconfig",
+        default_value=PathJoinSubstitution([EnvironmentVariable("ROS_WS", default_value="/home/katallen/sandbox"),
+            "src/springcontroller/springcontroller/config/springs.yaml"
+    ]),
+    )
+            
 
     joint_order_arg = DeclareLaunchArgument(
         "joint_order",
@@ -204,7 +218,7 @@ def generate_launch_description():
             "cam_roll":  LaunchConfiguration("cam_roll"),
             "cam_pitch": LaunchConfiguration("cam_pitch"),
             "cam_yaw":   LaunchConfiguration("cam_yaw"),
-            "image_topic": LaunchConfiguration("image_topic"),
+            "color_image_topic": LaunchConfiguration("color_image_topic"),
         }.items(),
     )
 
@@ -237,10 +251,12 @@ def generate_launch_description():
             "robot_ip":      LaunchConfiguration("robot_ip"),
             "launch_rviz":   LaunchConfiguration("launch_rviz"),
             "urdf_path":     LaunchConfiguration("urdf_path"),
+            "config":        LaunchConfiguration("springconfig"),
             "joint_order":   LaunchConfiguration("joint_order"),
             "torque_topic":  LaunchConfiguration("torque_topic"),
             "command_topic": LaunchConfiguration("command_topic"),
-            "kinematics_params": LaunchConfiguration("kinematics_arg")
+            "kinematics_params": LaunchConfiguration("kinematics_params"),
+            "use_fake_hardware": LaunchConfiguration("use_fake_hardware")
         }.items(),
     )
 
@@ -279,6 +295,8 @@ def generate_launch_description():
         launch_rviz_arg,
         kinematics_params,
         urdf_path_arg,
+        use_fake_hardware_arg,
+        springconfig_arg,
         joint_order_arg,
         torque_topic_arg,
         command_topic_arg,
@@ -291,8 +309,9 @@ def generate_launch_description():
         LogInfo(msg="[demo] Starting Nav2 + SLAM + navigator_node ..."),
         nav_bringup,
 
-        LogInfo(msg="[demo] Starting person tracker ..."),
-        person_tracker,
+        #LogInfo(msg="[demo] Starting person tracker ..."),
+        #person_tracker,
+        LogInfo(msg="[demo] Skipping person tracker ..."),
 
         LogInfo(msg="[demo] Starting SMACH state machine ..."),
         state_machine_node,

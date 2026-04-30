@@ -13,7 +13,7 @@ Camera transform parameters (camera_link relative to map frame):
   cam_roll  (float) Roll  in radians.            Default: 0.0
   cam_pitch (float) Pitch in radians (tilt down: positive values). Default: 1.5708 (90deg, straight down)
   cam_yaw   (float) Yaw   in radians.            Default: 0.0
-  image_topic (string) Topic from the camera.    Default: /camera/color/image_raw
+  color_image_topic (string) Topic from the camera.    Default: /camera/color/image_raw
 """
 
 from launch import LaunchDescription
@@ -54,9 +54,9 @@ def generate_launch_description():
     cam_yaw_arg   = DeclareLaunchArgument("cam_yaw",   default_value="0.0")
 
     # ---- Image topic arg -------------------#
-    image_topic_arg = DeclareLaunchArgument(
-        "image_topic",
-        default_value="/camera/color/image_raw",
+    color_image_topic_arg = DeclareLaunchArgument(
+        "color_image_topic",
+        default_value="/bph_overhead_camera/image_raw",
         description="Camera color image topic",
     )
 
@@ -73,6 +73,7 @@ def generate_launch_description():
             LaunchConfiguration("cam_yaw"),
             LaunchConfiguration("cam_pitch"),
             LaunchConfiguration("cam_roll"),
+            LaunchConfiguration("color_image_topic"),
             "map",
             "camera_link",
         ],
@@ -107,7 +108,7 @@ def generate_launch_description():
         output="screen",
         parameters=[                          
             LaunchConfiguration("config"),
-            {"image_topic": LaunchConfiguration("image_topic")},
+            {"color_image_topic": LaunchConfiguration("color_image_topic")},
         ],
         condition=IfCondition(LaunchConfiguration("viz")),
     )
@@ -117,8 +118,8 @@ def generate_launch_description():
         viz_arg,
         cam_x_arg, cam_y_arg, cam_z_arg,
         cam_roll_arg, cam_pitch_arg, cam_yaw_arg,
-        image_topic_arg,                      
         static_tf_node,
+        color_image_topic_arg,
  #       camera_node, # started separately
         tracker_node,
         viz_node,

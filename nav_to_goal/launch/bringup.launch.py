@@ -4,7 +4,7 @@ bringup.launch.py
 -----------------
 Launches the full stack for depth-camera SLAM + Nav2 navigation:
 
-  1. depthimage_to_laserscan   — converts depth image → LaserScan
+  REMOVED 1. depthimage_to_laserscan   — handled on the turtlebot
   2. slam_toolbox (async)      — builds the map in real time
   3. nav2_bringup              — full Nav2 lifecycle stack
   4. navigator_node            — sends the goal once everything is ready
@@ -20,11 +20,7 @@ Key arguments (all optional):
   depth_info_topic  : str  (default /camera/depth/camera_info)
   robot_base_frame  : str  (default base_link)
 
-Example – TurtleBot4:
-  ros2 launch nav_to_goal bringup.launch.py \
-      depth_image_topic:=/astra/rgb/preview/depth \
-      robot_base_frame:=tb_base_link \
-      goal_x:=3.0 goal_y:=2.0
+
 """
 
 import os
@@ -84,6 +80,12 @@ def generate_launch_description():
     params_file = LaunchConfiguration("params_file")
     slam_params_file = LaunchConfiguration("slam_params_file")
 
+    navigate_on_start_arg = DeclareLaunchArgument(
+        "navigate_on_start",
+        default_value="true",
+        description="Send nav goal immediately on startup",
+    )
+
     # ── 1. depthimage_to_laserscan ─────────────────────────────────────────
     depth_to_scan_node = Node(
         package="depthimage_to_laserscan",
@@ -138,7 +140,7 @@ def generate_launch_description():
             "goal_yaw": LaunchConfiguration("goal_yaw"),
             "robot_base_frame": LaunchConfiguration("robot_base_frame"),
             "use_sim_time": use_sim_time,
-            "navigate_on_start": True,
+            "navigate_on_start": LaunchConfiguration("navigate_on_start"),
         }],
     )
 
@@ -152,8 +154,6 @@ def generate_launch_description():
         depth_image_topic_arg,
         depth_info_topic_arg,
         robot_base_frame_arg,
-        LogInfo(msg="Starting depth→scan converter …"),
-        depth_to_scan_node,
         LogInfo(msg="Starting slam_toolbox …"),
         slam_node,
         LogInfo(msg="Starting Nav2 …"),

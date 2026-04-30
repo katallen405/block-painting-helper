@@ -123,7 +123,7 @@ class PersonTrackerNode(Node):
         self.declare_parameter("publish_viz",   True)
         self.declare_parameter("depth_enabled", False)
         self.declare_parameter("zones",         "{}")
-        self.declare_parameter("image_topic", "/bph_overhead_camera/image_raw")
+        self.declare_parameter("color_image_topic", "/bph_overhead_camera/image_raw")
         
         self.model_path    = self.get_parameter("model_path").value
         self.confidence    = self.get_parameter("confidence").value
@@ -158,7 +158,7 @@ class PersonTrackerNode(Node):
  #           self.image_callback, sensor_qos,
  #       )
 
-        image_topic = self.get_parameter("image_topic").get_parameter_value().string_value
+        image_topic = self.get_parameter("color_image_topic").get_parameter_value().string_value
         self.image_sub = self.create_subscription(
             Image,
             image_topic,
