@@ -4,8 +4,13 @@
 - check how arm works with moveit - what needs to be launched?
 - measure turtlebot height
 - measure turtlebot and supply closet positions
+from base_link
+720 table to floor
+300 table edge to "tb_home"
 
-
+x offset 300+65 center of arm to tb_home
+y offset 65+130 center of arm to tb_home
+z offset 215+720
 
 DONE
 - add launching camera to demo.launch.py (nope, has to be done on local machine)

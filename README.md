@@ -32,6 +32,7 @@ In this repository but not run here:
   pip uninstall opencv-python
   pip install "numpy<2"
   pip install roslibpy
+  pip install lap
 
   In each terminal or in your .bashrc:
   export PYTHONPATH=$VIRTUAL_ENV/lib/python3.12/site-packages:$PYTHONPATH
