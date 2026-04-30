@@ -9,7 +9,9 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/MoveToPose.srv"
   "action/BphPickmeup.action"
   "srv/GoToLocation.srv"
-  DEPENDENCIES geometry_msgs
+  "srv/GetTargetPose.srv"
+  "srv/SetTargetColor.srv"
+DEPENDENCIES geometry_msgs
 
 )
 ament_export_dependencies(rosidl_default_runtime)

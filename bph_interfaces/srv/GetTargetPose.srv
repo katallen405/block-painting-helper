@@ -1,0 +1,9 @@
+# GetTargetPose.srv
+# -----------------
+# Ask the colour-picker for the current best-match object pose.
+
+string color       # e.g. "red", "green", "blue", "yellow", "natural"
+---
+bool success
+string message
+geometry_msgs/PoseStamped pose

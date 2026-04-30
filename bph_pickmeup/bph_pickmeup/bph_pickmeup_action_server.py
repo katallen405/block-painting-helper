@@ -17,7 +17,7 @@ Usage
 
 import rclpy
 from rclpy.node import Node
-from rclpy.action import ActionServer, CancelResponse, GoalResponse
+from rclpy.action import ActionServer, CancelResponse, GoalResponse, ActionClient
 from rclpy.action.server import ServerGoalHandle
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
@@ -30,11 +30,7 @@ from moveit_msgs.msg import (
     Constraints,
     MoveItErrorCodes,
 )
-from rclpy.action import ActionClient
 
-# Replace with your generated package name, e.g.:
-#   from bph_interfaces.action import BphPickmeup
-# For now we use a placeholder import path – update to match your package.
 from bph_interfaces.action import BphPickmeup
 
 
@@ -47,7 +43,7 @@ JOINT_NAMES = [
     "wrist_3_joint",
 ]
 
-# Named positions registry – extend as needed
+# Named positions registry
 NAMED_POSITIONS: dict[str, list[float]] = {
     "home":      [0.0, -1.5707, 0.0, -1.5707, 0.0, 0.0],
     "pre_grasp": [0.0, -1.2000, 0.5, -1.8000, 0.0, 0.0],
@@ -59,7 +55,12 @@ class BphPickmeupServer(Node):
 
     def __init__(self):
         super().__init__("bph_pickmeup_action_server")
-
+        
+        self._execute_client = ActionClient(
+            self,
+            ExecuteTrajectory,
+            '/execute_trajectory'  
+)
         # ReentrantCallbackGroup lets the action server handle goals
         # concurrently with the MoveIt client callbacks.
         self._cb_group = ReentrantCallbackGroup()
@@ -199,8 +200,8 @@ class BphPickmeupServer(Node):
 
         # ---- Now execute the plan ----
         self.get_logger().info('Executing plan...')
-        exec_goal = self._build_moveit_goal(joint_angles)
-        exec_goal.planning_options.plan_only = False   # execute this time
+        exec_goal = ExecuteTrajectory.Goal()
+        exec_goal.trajectory = plan_result.planned_trajectory # reuse the plan from before
 
         feedback.current_state = 'executing'
         feedback.progress      = 0.6

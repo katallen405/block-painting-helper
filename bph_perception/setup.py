@@ -1,28 +1,31 @@
 from setuptools import find_packages, setup
 
-package_name = 'bph_statemachine'
+package_name = 'bph_perception'
 
 setup(
     name=package_name,
-    version='0.0.1',
+    version='0.0.0',
     packages=find_packages(exclude=['test']),
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        ('share/' + package_name + '/launch', ['launch/demo.launch.py']),
-        ('share/' + package_name + '/launch', ['launch/arm.launch.py']),
     ],
+    package_data={'': ['py.typed']},
     install_requires=['setuptools'],
     zip_safe=True,
     maintainer='Kat Allen',
     maintainer_email='kat.allen@tufts.edu',
-    description='SMACH state machine for block painting helper',
-    license='Apache-2.0',
-    tests_require=['pytest'],
+    description='identify location of objects in the workspace',
+    license='TBD',
+    extras_require={
+        'test': [
+            'pytest',
+        ],
+    },
     entry_points={
         'console_scripts': [
-            'simple_sm_node = bph_statemachine.simplified_sm:main',
+            'color_picker = bph_perception.color_picker_node:main'
         ],
     },
 )

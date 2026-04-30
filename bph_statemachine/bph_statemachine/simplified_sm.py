@@ -77,16 +77,19 @@ class RobotFetchNode(Node):
         # TODO: self.nav_goal_pub = self.create_publisher(...)
         # TODO: self.arm_goal_pub = self.create_publisher(...)
         # TODO: self.gripper_pub  = self.create_publisher(...)
-
+        self.switch_client = self.create-client(
+            SwitchController,
+            '/controller_manager/switch_controller')
 
         self.get_logger().info("RobotFetchNode initialised")
-
+        self.requested_object_color = "red" # overwritten by UI
+        
     # Convenience: read parameters in one place so states don't hard-code strings
     @property
     def home_location(self):
         x = self.get_parameter("home_location.x").get_parameter_value().double_value
         y = self.get_parameter("home_location.y").get_parameter_value().double_value
-        yaw = self.get_parameter("home_location.yaw").get_parameter_value().double_value
+        yaw = self.get_parameter("home_location.z").get_parameter_value().double_value
         return x, y, yaw
 
     @property
@@ -103,6 +106,15 @@ class RobotFetchNode(Node):
     @property
     def workspace_position_name(self):
         return self.get_parameter("workspace_position_name").get_parameter_value().string_value
+
+    def switch_controllers(self, activate, deactivate):
+        #switch controls with ros2 controller manager
+        #blocks until the controller manager answers
+        req = SwitchController.Request()
+        req.activate_controllers = activate
+        req.deactivate_controllers = deactivate
+        req.strictness = 2
+        return self.switch_client.call_async(req)
 
     def build_and_run_sm(self):
         """Construct the SMACH state machine and execute it."""
@@ -176,6 +188,9 @@ class _FetchState(smach.State):
         smach.State.__init__(self, outcomes=outcomes)
         self._node = node
         self._latch = _TopicLatch()
+        ##FIXME These should be parameters
+        self.effort_controller = "forward_effort_controller"
+        self.position_controller = "scaled_joint_trajectory_controller"
 
     def _wait_for_latch(self):
         rate = self._node.create_rate(10)
@@ -308,9 +323,14 @@ class LocatingObjectAndPeople(_FetchState):
 
     def execute(self, userdata):
         self._node.get_logger().info("[LocatingObjectAndPeople] Waiting for /object/location …")
-        # TODO: request locations of people to avoid
-        # TODO: request location of object to grasp
+        # TODO: request locations of people to avoid from person_detector
         
+        # TODO: request location of object to grasp from object_detector
+        request = GetTargetPose.Request()
+        request.color = self.requested_object_color
+        response = self.get_pose_client.call(request)
+        if response.success:
+            go_to(response.pose)
         self._latch.reset()
         sub = self._node.create_subscription(String, "/object/location", self._latch.callback, 10)
         self._wait_for_latch()
@@ -336,12 +356,19 @@ class PickAndPlace(_FetchState):
 
     def execute(self, userdata):
         self._node.get_logger().info("[PickAndPlace] Moving arm to grasp position …")
+        # first switch to the position controller
+        req = SwitchController.Request()
+        req.activate_controllers = self.effort_controller
+        req.deactivate_controllers = self.position_controller
+        req.strictness = 2
+        return self.switch_client.call_async(req)
+    
         request = MoveToPose.Request()
-        x, y, yaw = self.home_location()
+        x, y, z, yaw = self.home_location()
         request.target_pose = geometry_msgs/PoseStamped()
         request.target_pose.pose.position.x = x
         request.target_pose.pose.position.y = y
-        request.target_pose.pose.position.z = 0.0
+        request.target_pose.pose.position.z = z
         request.target_pose.pose.orientation.z = yaw
         request.arm_name = ""
         request.end_effector_link = ""

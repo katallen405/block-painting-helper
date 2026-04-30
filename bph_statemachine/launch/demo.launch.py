@@ -3,33 +3,56 @@
 demo.launch.py
 --------------
 Launches the full block-painting-helper demo stack:
-
-  1. nav_to_goal/bringup  — depth->scan, slam_toolbox, Nav2, navigator_node
-  2. person_tracker       — camera, static TF, person tracker, top-down viz
-  3. simple_sm_node       — top-level SMACH state machine
-  4. bph_pickmeup_node    — arm pick-and-place action server
+  0. rosbridge          — turtlebot communication
+  1. nav_to_goal/bringup — depth->scan, slam_toolbox, Nav2, navigator_node
+  2. person_tracker      — camera, static TF, person tracker, top-down viz
+  3. simple_sm_node      — top-level SMACH state machine
+  4. bph_pickmeup_node   — arm pick-and-place action server
+  5. arm.launch.py       — UR3e driver + virtual spring controller + torque relay
+  5.5 overhead webcam - v4l2_camera camera node publishing on /image_raw 
+  6. color_picker_node   — overhead-camera colour-based object localisation
 
 Key arguments (all optional):
-  use_sim_time      : bool  (default false)
-  params_file       : path  (default nav_to_goal config/nav2_params.yaml)
-  slam_params_file  : path  (default nav_to_goal config/slam_params.yaml)
-  depth_image_topic : str   (default /camera/depth/image_raw)
-  depth_info_topic  : str   (default /camera/depth/camera_info)
-  robot_base_frame  : str   (default base_link)
-  cam_x / cam_y / cam_z / cam_roll / cam_pitch / cam_yaw : float
-    (overhead camera pose in the map frame)
+  use_sim_time      : bool   (default false)
+  params_file       : path   (default nav_to_goal config/nav2_params.yaml)
+  slam_params_file  : path   (default nav_to_goal config/slam_params.yaml)
+  depth_image_topic : str    (default /camera/depth/image_raw)
+  depth_info_topic  : str    (default /camera/depth/camera_info)
+  robot_base_frame  : str    (default base_link)
+
+  cam_x/y/z/roll/pitch/yaw  : float  — overhead camera pose in map frame
+
+  robot_ip          : str    (default 10.3.4.10) — UR3e IP
+  launch_rviz       : bool   (default false)
+  urdf_path         : path   — URDF for virtual spring node
+  joint_order       : list   — joint ordering for torque relay
+  torque_topic      : str    (default /virtual_spring_node/joint_torques)
+  command_topic     : str    (default /forward_effort_controller/commands)
+
+  color_image_topic : str    (default /image_raw)
+    RGB topic fed to the colour-picker; should come from the same overhead
+    camera used by person_tracker.
+  target_color      : str    (default red)
+    HSV colour target the picker looks for on start-up.  The state machine
+    can override this at runtime via the ~/set_target_color service.
 
 Example:
   ros2 launch bph_statemachine demo.launch.py use_sim_time:=false
-  ros2 launch bph_statemachine demo.launch.py cam_z:=2.0 cam_x:=1.5 cam_y:=0.5 cam_pitch:=1.0
+  ros2 launch bph_statemachine demo.launch.py cam_z:=2.0 target_color:=blue
 """
 
-import os
 import math
+import os
+import sys
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, LogInfo
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    LogInfo,
+    SetEnvironmentVariable,
+)
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -38,8 +61,21 @@ from launch_ros.actions import Node
 def generate_launch_description():
     nav_pkg     = get_package_share_directory("nav_to_goal")
     tracker_pkg = get_package_share_directory("person_tracker")
+    # bph_statemachine shares its launch dir with arm.launch.py
+    bph_sm_pkg  = get_package_share_directory("bph_statemachine")
 
-    # ---- Shared args ---------------------------------------------------------
+    # ── Inject venv site-packages so all nodes pick up extra dependencies ────
+    _venv_site = (
+        "/home/katallen/.ros_venv/lib/"
+        f"python{sys.version_info.major}.{sys.version_info.minor}"
+        "/site-packages"
+    )
+    set_pythonpath = SetEnvironmentVariable(
+        name="PYTHONPATH",
+        value=_venv_site + ":" + os.environ.get("PYTHONPATH", ""),
+    )
+
+    # ── Shared / navigation args ─────────────────────────────────────────────
     use_sim_time_arg = DeclareLaunchArgument(
         "use_sim_time", default_value="false",
         description="Use simulation clock",
@@ -64,16 +100,83 @@ def generate_launch_description():
         "robot_base_frame", default_value="base_link",
     )
 
+    # ── Overhead camera pose args ────────────────────────────────────────────
     cam_x_arg     = DeclareLaunchArgument("cam_x",     default_value="0.0")
     cam_y_arg     = DeclareLaunchArgument("cam_y",     default_value="0.0")
     cam_z_arg     = DeclareLaunchArgument("cam_z",     default_value="2.5")
     cam_roll_arg  = DeclareLaunchArgument("cam_roll",  default_value="0.0")
-    cam_pitch_arg = DeclareLaunchArgument("cam_pitch", default_value=str(math.pi / 2))
+    cam_pitch_arg = DeclareLaunchArgument(
+        "cam_pitch", default_value=str(math.pi / 2),
+    )
     cam_yaw_arg   = DeclareLaunchArgument("cam_yaw",   default_value="0.0")
+
+    # ── UR arm / spring-controller args ─────────────────────────────────────
+    robot_ip_arg = DeclareLaunchArgument(
+        "robot_ip",
+        default_value="10.3.4.10",
+        description="IP address of the UR3e robot.",
+    )
+    launch_rviz_arg = DeclareLaunchArgument(
+        "launch_rviz",
+        default_value="false",
+        description="Whether to launch RViz alongside the UR driver.",
+    )
+    urdf_path_arg = DeclareLaunchArgument(
+        "urdf_path",
+        default_value=(
+            "/home/katallen/workspace/src/springcontroller/"
+            "springcontroller/flat_urdf_files/ceeorobot_flat.urdf"
+        ),
+        description="Absolute path to the URDF used by the virtual spring node.",
+    )
+    joint_order_arg = DeclareLaunchArgument(
+        "joint_order",
+        default_value=(
+            "[elbow_joint, shoulder_lift_joint, shoulder_pan_joint,"
+            " wrist_1_joint, wrist_2_joint, wrist_3_joint]"
+        ),
+        description="Ordered joint names for the torque relay.",
+    )
+    torque_topic_arg = DeclareLaunchArgument(
+        "torque_topic",
+        default_value="/virtual_spring_node/joint_torques",
+        description="Input topic carrying spring torques (sensor_msgs/JointState).",
+    )
+    command_topic_arg = DeclareLaunchArgument(
+        "command_topic",
+        default_value="/forward_effort_controller/commands",
+        description="Output topic sent to the effort controller.",
+    )
+
+    # ── Colour-picker args ───────────────────────────────────────────────────
+    color_image_topic_arg = DeclareLaunchArgument(
+        "color_image_topic",
+        default_value="/camera/color/image_raw",
+        description=(
+            "RGB image topic for the colour-picker node.  "
+            "Should be the same physical camera used by person_tracker."
+        ),
+    )
+    target_color_arg = DeclareLaunchArgument(
+        "target_color",
+        default_value="red",
+        description=(
+            "Start-up colour target ('red', 'green', 'blue', …).  "
+            "The state machine can override this via ~/set_target_color."
+        ),
+    )
 
     use_sim_time = LaunchConfiguration("use_sim_time")
 
-    # ---- 1. Nav2 + SLAM + navigator_node ------------------------------------
+    # ── 0. ROSBridge ─────────────────────────────────────────────────────────
+    turtlebridge_bringup = Node(
+        package="nav_to_goal",
+        executable="turtlebot_bridge",
+        name="turtle_bridge",
+        output="screen",
+    )
+
+    # ── 1. Nav2 + SLAM + navigator_node ──────────────────────────────────────
     nav_bringup = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(nav_pkg, "launch", "bringup.launch.py")
@@ -85,11 +188,11 @@ def generate_launch_description():
             "depth_image_topic": LaunchConfiguration("depth_image_topic"),
             "depth_info_topic":  LaunchConfiguration("depth_info_topic"),
             "robot_base_frame":  LaunchConfiguration("robot_base_frame"),
-            "navigate_on_start": "false",  # state machine drives navigation
+            "navigate_on_start": "false",   # state machine drives navigation
         }.items(),
     )
 
-    # ---- 2. Camera + person tracker + top-down viz --------------------------
+    # ── 2. Overhead camera + person tracker + top-down viz ───────────────────
     person_tracker = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(tracker_pkg, "launch", "person_tracker.launch.py")
@@ -104,7 +207,7 @@ def generate_launch_description():
         }.items(),
     )
 
-    # ---- 3. Top-level SMACH state machine -----------------------------------
+    # ── 3. Top-level SMACH state machine ─────────────────────────────────────
     state_machine_node = Node(
         package="bph_statemachine",
         executable="simple_sm_node",
@@ -112,7 +215,7 @@ def generate_launch_description():
         output="screen",
     )
 
-    # ---- 4. Arm pick-and-place action server --------------------------------
+    # ── 4. Arm pick-and-place action server ───────────────────────────────────
     pickmeup_node = Node(
         package="bph_pickmeup",
         executable="bph_pickmeup_node",
@@ -120,7 +223,65 @@ def generate_launch_description():
         output="screen",
     )
 
+    # ── 5. UR3e driver + virtual spring + torque relay ───────────────────────
+    #
+    #  arm.launch.py lives in the same launch/ directory as this file.
+    #  It starts: ur_robot_driver, virtual_spring_node, torque_relay.
+    #
+    arm_bringup = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(bph_sm_pkg, "launch", "arm.launch.py")
+        ),
+        launch_arguments={
+            "robot_ip":      LaunchConfiguration("robot_ip"),
+            "launch_rviz":   LaunchConfiguration("launch_rviz"),
+            "urdf_path":     LaunchConfiguration("urdf_path"),
+            "joint_order":   LaunchConfiguration("joint_order"),
+            "torque_topic":  LaunchConfiguration("torque_topic"),
+            "command_topic": LaunchConfiguration("command_topic"),
+        }.items(),
+    )
+    # 5.5 camera node
+    # publishes to /image_raw
+    # used by both color_picker and person_finder
+    
+    camera_bringup = Node(
+        package = "v4l2_camera"
+        executable = "v4l2_camera_node"
+        name = "overhead_camera"
+        output = "screen"
+        parameters=[{'video_device': '/dev/video0'}],
+        remappings=[
+            ('/image_raw', '/bph_overhead_camera/image_raw'),
+            ('/camera_info', '/bph_overhead_camera/camera_info')
+            ]
+        )
+
+    
+    # ── 6. Colour-based object picker (perception) ───────────────────────────
+    #
+    #  Node lives in bph_perception package.
+    #  It shares the overhead camera RGB + depth streams with person_tracker.
+    #  Exposes:
+    #    ~/get_target_pose  (service)  — called by the state machine
+    #    ~/set_target_color (service)  — lets the SM change colour at runtime
+    #    ~/debug_image      (topic)    — annotated image for rviz / debugging
+    #
+    color_picker_node = Node(
+        package="bph_perception",
+        executable="color_picker_node",
+        name="color_picker",
+        output="screen",
+        parameters=[{
+            "color_image_topic": LaunchConfiguration("color_image_topic"),
+             "target_color":      LaunchConfiguration("target_color"),
+        }],
+    )
+
     return LaunchDescription([
+        set_pythonpath,             # must come first
+
+        # declare all args
         use_sim_time_arg,
         params_file_arg,
         slam_params_file_arg,
@@ -129,12 +290,37 @@ def generate_launch_description():
         robot_base_frame_arg,
         cam_x_arg, cam_y_arg, cam_z_arg,
         cam_roll_arg, cam_pitch_arg, cam_yaw_arg,
+        robot_ip_arg,
+        launch_rviz_arg,
+        urdf_path_arg,
+        joint_order_arg,
+        torque_topic_arg,
+        command_topic_arg,
+        color_image_topic_arg,
+        target_color_arg,
+
+        # start nodes / sub-launches
+        LogInfo(msg="[demo] Starting ROSBridge ..."),
+        turtlebridge_bringup,
+
         LogInfo(msg="[demo] Starting Nav2 + SLAM + navigator_node ..."),
         nav_bringup,
+
         LogInfo(msg="[demo] Starting person tracker ..."),
         person_tracker,
-        LogInfo(msg="[demo] Starting state machine ..."),
+
+        LogInfo(msg="[demo] Starting SMACH state machine ..."),
         state_machine_node,
-        LogInfo(msg="[demo] Starting arm action server ..."),
+
+        LogInfo(msg="[demo] Starting arm pick-and-place server ..."),
         pickmeup_node,
+
+        LogInfo(msg="[demo] Starting UR3e arm + spring controller ..."),
+        arm_bringup,
+
+        LogInfo(msg="[demo] Starting overhead webcam v4l2_camera ..."),
+        camera_bringup,
+
+        LogInfo(msg="[demo] Starting colour-picker perception node ..."),
+        color_picker_node,
     ])

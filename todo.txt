@@ -1,12 +1,20 @@
-Launch file bph_statemachine demo.launch.py needs to start
-- python3 sandbox/src/block-painting-helper/nav_to_goal/nav_to_goal/turtlebot_bridge.py
-  - this also needs to be a rosrun, register with package
-- all the springcontroller stuff
+- add launching camera to demo.launch.py
+(stretch)- get UI have pictures of blocks which send colors to color_picker_node via statemachine
+(stretch)- get UI to make webpage to show which block is wanted?
+- check how arm works with moveit - what needs to be launched?
+- measure turtlebot height
+- measure turtlebot and supply closet positions
+- calibrate camera
+ros2 run camera_calibration cameracalibrator --size 7x9 --square 0.02 --ros-args -r image:=/bph_overhead_camera/image_raw
 
-- bph_statemachine needs to somehow swap the ros2 control from position control to effort control for the UR3e when the arm is given a nav_to_goal command
+
+
 
 Already in demo.launch.py:
-  1. nav_to_goal/bringup  — depth->scan, slam_toolbox, Nav2, navigator_node
+0 turtlebridge
+1. nav_to_goal/bringup  — depth->scan, slam_toolbox, Nav2, navigator_node
   2. person_tracker       — camera, static TF, person tracker, top-down viz
   3. simple_sm_node       — top-level SMACH state machine
   4. bph_pickmeup_node    — arm pick-and-place action server
+  
+- bph_statemachine can swap between position controller and effort controller when appropriate

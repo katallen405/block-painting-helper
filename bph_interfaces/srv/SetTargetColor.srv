@@ -1,0 +1,15 @@
+# SetTargetColor.srv
+# ------------------
+# Tell the colour-picker which colour to look for next.
+# Called by the state machine each time it decides which block to fetch.
+
+# ── Request ──────────────────────────────────────────────────────────────────
+
+# One of: "red", "green", "blue", "yellow"  (must match COLOR_PROFILES keys)
+string color
+
+---
+# ── Response ─────────────────────────────────────────────────────────────────
+
+bool   success
+string message

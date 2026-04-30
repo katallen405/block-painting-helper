@@ -36,6 +36,7 @@ In this repository but not run here:
   In each terminal or in your .bashrc:
   export PYTHONPATH=$VIRTUAL_ENV/lib/python3.12/site-packages:$PYTHONPATH
   (this allows ROS to use the venv)
+  (This also goes in the launch file, but is needed for debug)
 
 # Running details
   ssh into the Turtlebot laptop:
