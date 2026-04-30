@@ -1,0 +1,28 @@
+image_width: 640
+image_height: 480
+camera_name: hd_pro_webcam_c920
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: [645.299692, 0.000000, 314.179613, 0.000000, 648.777260, 211.145745, 0.000000, 0.000000, 1.000000]
+distortion_model: plumb_bob
+distortion_coefficients:
+  rows: 1
+  cols: 5
+  data: [0.007914, -0.093456, -0.011719, -0.000061, 0.000000]
+rectification_matrix:
+  rows: 3
+  cols: 3
+  dt: d
+  data: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+projection_matrix:
+  rows: 3
+  cols: 4
+  dt: d
+  data: [643.8867797851562, 0.0, 313.51609237399316,
+  0.0, 0.0, 645.0162353515625,
+  207.25961379364162, 0.0, 0.0,
+  0.0, 1.0, 0.0]
+
+
+
