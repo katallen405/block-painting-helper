@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Block Request Display</title>
+<script src="https://cdn.jsdelivr.net/npm/roslib@1/build/roslib.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: system-ui, sans-serif;
+  background: #f0f0ee;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  transition: background 0.5s;
+}
+
+/* ── Small status strip at top ── */
+.status-strip {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 14px; background: rgba(0,0,0,0.06);
+  font-size: 12px; color: rgba(0,0,0,0.45);
+}
+.dot { width: 7px; height: 7px; border-radius: 50%; background: #bbb; flex-shrink: 0; }
+.dot.ok  { background: #3b8a3b; }
+.dot.err { background: #c83232; }
+
+/* ── Main display area ── */
+.display {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 40px 30px; text-align: center; gap: 20px;
+}
+
+.block-img { line-height: 0; }
+
+.msg-line {
+  font-size: clamp(28px, 5vw, 52px);
+  font-weight: 400;
+  color: #2a2a2a;
+  line-height: 1.25;
+}
+
+.color-name {
+  font-size: clamp(42px, 8vw, 80px);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1.1;
+}
+
+.idle-msg {
+  font-size: clamp(18px, 3vw, 28px);
+  color: #aaa;
+  font-style: italic;
+}
+
+/* ── ROS URL config (collapsed by default, click status strip to expand) ── */
+.config-drawer {
+  display: none;
+  padding: 10px 14px;
+  background: rgba(0,0,0,0.05);
+  border-bottom: 1px solid rgba(0,0,0,0.08);
+  gap: 8px; align-items: center; flex-wrap: wrap;
+  font-size: 13px;
+}
+.config-drawer.open { display: flex; }
+.config-drawer input {
+  padding: 4px 8px; border: 1px solid #ccc; border-radius: 6px;
+  font-size: 13px; font-family: monospace; width: 210px;
+}
+.config-drawer button {
+  padding: 4px 10px; border: 1px solid #ccc; border-radius: 6px;
+  background: #fff; cursor: pointer; font-size: 13px; font-family: inherit;
+}
+.config-drawer button:hover { background: #f0f0f0; }
+</style>
+</head>
+<body>
+
+<!-- Status strip — click to expand config -->
+<div class="status-strip" id="strip" style="cursor:pointer" title="Click to configure rosbridge URL">
+  <span class="dot" id="dot"></span>
+  <span id="conn-label">Connecting&hellip;</span>
+  <span style="margin-left:auto;opacity:0.5">&#9881;</span>
+</div>
+
+<!-- Collapsible ROS config -->
+<div class="config-drawer" id="drawer">
+  <label style="font-size:12px;color:#666">Rosbridge URL:</label>
+  <input type="text" id="ros-url" value="ws://localhost:9090">
+  <button id="btn-reconnect">Reconnect</button>
+  <label style="font-size:12px;color:#666;margin-left:8px">Button topic:</label>
+  <input type="text" id="t-button" value="/button" style="width:140px">
+  <label style="font-size:12px;color:#666;margin-left:8px">Material topic:</label>
+  <input type="text" id="t-material" value="/requestedmaterial" style="width:160px">
+</div>
+
+<!-- Main display -->
+<div class="display" id="display">
+  <p class="idle-msg">Waiting for paint block request&hellip;</p>
+</div>
+
+<script>
+'use strict';
+
+// ── Color palette (matches index.html) ──────────────────────────────────
+const COLORS = {
+  red:    { main: '#C83232', light: '#E85555', dark: '#A02828', bg: '#fff4f4' },
+  blue:   { main: '#2860B4', light: '#4A85DC', dark: '#1A4A94', bg: '#f4f7ff' },
+  yellow: { main: '#D4A800', light: '#EBC830', dark: '#B48800', bg: '#fffce8' },
+  green:  { main: '#2E7A2E', light: '#4AAA4A', dark: '#1E5A1E', bg: '#f4fff4' },
+};
+
+// ── Inline SVG brick ─────────────────────────────────────────────────────
+function brickSVG(colorName, size) {
+  const c = COLORS[colorName];
+  if (!c) return '';
+  const h = Math.round(size * 0.66);
+  return (
+    `<svg viewBox="0 0 100 66" xmlns="http://www.w3.org/2000/svg" width="${size}" height="${h}" style="display:block;overflow:visible">` +
+    `<rect x="2" y="28" width="96" height="34" rx="5" fill="${c.main}"/>` +
+    `<rect x="2" y="56" width="96" height="6" rx="3" fill="${c.dark}"/>` +
+    `<rect x="2" y="28" width="96" height="10" rx="4" fill="${c.light}" opacity="0.45"/>` +
+    `<rect x="13" y="12" width="24" height="18" fill="${c.main}"/>` +
+    `<rect x="63" y="12" width="24" height="18" fill="${c.main}"/>` +
+    `<ellipse cx="25" cy="28" rx="12" ry="5" fill="${c.dark}"/>` +
+    `<ellipse cx="75" cy="28" rx="12" ry="5" fill="${c.dark}"/>` +
+    `<ellipse cx="25" cy="12" rx="12" ry="6" fill="${c.light}"/>` +
+    `<ellipse cx="75" cy="12" rx="12" ry="6" fill="${c.light}"/>` +
+    `<ellipse cx="21" cy="9" rx="6" ry="3" fill="rgba(255,255,255,0.45)"/>` +
+    `<ellipse cx="71" cy="9" rx="6" ry="3" fill="rgba(255,255,255,0.45)"/>` +
+    `</svg>`
+  );
+}
+
+// ── State machine ────────────────────────────────────────────────────────
+// idle   → (receive /requestedmaterial) → please
+// please → (receive /button)            → thankyou
+// thankyou → (receive /requestedmaterial for next request) → please
+let state = 'idle';
+let currentColor = null;
+
+function brickSize() {
+  return Math.min(220, Math.round(window.innerWidth * 0.28));
+}
+
+function renderDisplay() {
+  const el = document.getElementById('display');
+
+  if (state === 'idle') {
+    document.body.style.background = '#f0f0ee';
+    el.innerHTML = '<p class="idle-msg">Waiting for paint block request…</p>';
+    return;
+  }
+
+  const c = COLORS[currentColor];
+  if (!c) return;
+
+  document.body.style.background = c.bg;
+
+  const svg = brickSVG(currentColor, brickSize());
+  const colorLabel = '<span class="color-name" style="color:' + c.main + '">' + currentColor + '</span>';
+
+  if (state === 'please') {
+    el.innerHTML =
+      '<div class="block-img">' + svg + '</div>' +
+      '<p class="msg-line">Please may I have a</p>' +
+      colorLabel +
+      '<p class="msg-line">block?</p>';
+  } else if (state === 'thankyou') {
+    el.innerHTML =
+      '<div class="block-img">' + svg + '</div>' +
+      '<p class="msg-line">Thank you for the</p>' +
+      colorLabel +
+      '<p class="msg-line">block!</p>';
+  }
+}
+
+// ── ROS connection ───────────────────────────────────────────────────────
+let ros = null;
+let materialSub = null;
+let buttonSub   = null;
+
+function defaultRosUrl() {
+  // Use URL param ?ros=ws://... or default to same host on port 9090
+  const params = new URLSearchParams(location.search);
+  return params.get('ros') || ('ws://' + location.hostname + ':9090');
+}
+
+function connectRos(url) {
+  if (ros) { try { ros.close(); } catch(e) {} }
+  ros = new ROSLIB.Ros({ url: url });
+
+  ros.on('connection', function() {
+    document.getElementById('dot').className = 'dot ok';
+    document.getElementById('conn-label').textContent = 'Connected to ' + url;
+    subscribe();
+  });
+  ros.on('error', function(e) {
+    document.getElementById('dot').className = 'dot err';
+    document.getElementById('conn-label').textContent = 'Connection error — click to configure';
+  });
+  ros.on('close', function() {
+    document.getElementById('dot').className = 'dot';
+    document.getElementById('conn-label').textContent = 'Disconnected — click to configure';
+  });
+}
+
+function subscribe() {
+  const buttonTopic   = document.getElementById('t-button').value.trim();
+  const materialTopic = document.getElementById('t-material').value.trim();
+
+  // Subscribe to /requestedmaterial → transition to "please"
+  materialSub = new ROSLIB.Topic({ ros: ros, name: materialTopic, messageType: 'std_msgs/msg/String' });
+  materialSub.subscribe(function(msg) {
+    const color = (msg.data || '').toLowerCase().trim();
+    if (!COLORS[color]) return;
+    currentColor = color;
+    state = 'please';
+    renderDisplay();
+  });
+
+  // Subscribe to /button → advance to "thank you" only when in "please" state.
+  // The initial "go" from clicking a paint button is sent BEFORE /requestedmaterial
+  // (150 ms earlier), so when it arrives we are still in "idle" and it is ignored.
+  buttonSub = new ROSLIB.Topic({ ros: ros, name: buttonTopic, messageType: 'std_msgs/msg/String' });
+  buttonSub.subscribe(function() {
+    if (state === 'please') {
+      state = 'thankyou';
+      renderDisplay();
+    }
+  });
+}
+
+// Toggle config drawer
+document.getElementById('strip').addEventListener('click', function() {
+  document.getElementById('drawer').classList.toggle('open');
+});
+
+document.getElementById('btn-reconnect').addEventListener('click', function() {
+  const url = document.getElementById('ros-url').value.trim();
+  connectRos(url);
+});
+
+window.addEventListener('resize', function() {
+  if (state !== 'idle') renderDisplay();
+});
+
+// Auto-connect on load
+const rosUrl = defaultRosUrl();
+document.getElementById('ros-url').value = rosUrl;
+connectRos(rosUrl);
+</script>
+</body>
+</html>

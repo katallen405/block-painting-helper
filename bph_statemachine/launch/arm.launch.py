@@ -25,6 +25,12 @@ def generate_launch_description():
         description="Whether to launch RViz alongside the UR driver.",
     )
 
+    use_fake_hardware_arg = DeclareLaunchArgument(
+    "use_fake_hardware",
+    default_value="true",
+    description="Use fake hardware for UR arm",
+)
+
     # --- virtual_spring_node ---
     urdf_path_arg = DeclareLaunchArgument(
         "urdf_path",
@@ -72,7 +78,8 @@ def generate_launch_description():
         launch_arguments={
             "robot_ip":    LaunchConfiguration("robot_ip"),
             "launch_rviz": LaunchConfiguration("launch_rviz"),
-            "kinematics_params": LaunchConfiguration("kinematics_params")
+            "kinematics_params": LaunchConfiguration("kinematics_params"),
+            "use_fake_hardware": LaunchConfiguration("use_fake_hardware")
         }.items(),
     )
 
@@ -121,6 +128,7 @@ def generate_launch_description():
         command_topic_arg,
         kinematics_params,
         # nodes / included launches
+        use_fake_hardware_arg,
         ur_driver,
         virtual_spring_node,
         torque_relay,

@@ -3,12 +3,13 @@
 bph_pickmeup client helper 
 """
 
+import threading
+
 import rclpy
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from moveit_msgs.msg import MoveItErrorCodes
 
-# Replace with your generated package import:
 from bph_interfaces.action import BphPickmeup
 
 
@@ -58,21 +59,35 @@ class BphPickmeupClient:
             f"{'joint_angles' if joint_angles else repr(position_name)}"
         )
 
-        send_future = self._client.send_goal_async(
+        accept_event = threading.Event()
+        accept_result = [None]
+
+        def accept_cb(f):
+            accept_result[0] = f.result()
+            accept_event.set()
+
+        self._client.send_goal_async(
             goal,
             feedback_callback=feedback_cb or self._default_feedback_cb,
-        )
-        rclpy.spin_until_future_complete(self._node, send_future)
+        ).add_done_callback(accept_cb)
+        accept_event.wait()
 
-        goal_handle = send_future.result()
+        goal_handle = accept_result[0]
         if not goal_handle.accepted:
             self._node.get_logger().warn("bph_pickmeup goal was rejected.")
             return False, MoveItErrorCodes.PLANNING_FAILED
 
-        result_future = goal_handle.get_result_async()
-        rclpy.spin_until_future_complete(self._node, result_future)
+        result_event = threading.Event()
+        result_val = [None]
 
-        result = result_future.result().result
+        def result_cb(f):
+            result_val[0] = f.result()
+            result_event.set()
+
+        goal_handle.get_result_async().add_done_callback(result_cb)
+        result_event.wait()
+
+        result = result_val[0].result
         self._node.get_logger().info(
             f"bph_pickmeup result: success={result.success}, "
             f"code={result.error_code}, msg='{result.message}'"
