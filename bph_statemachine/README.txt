@@ -1,3 +1,21 @@
+Turtlebot:
+ssh -L 9090:localhost:9090 baymax@10.5.10.74
+ros2 launch turtlebot_bringup.launch.py
+
+Second Turtlebot:
+ssh baymax@10.5.10.74
+ros2 run kobuki_keyop kobuki_keyop_node --ros-args -r /cmd_vel:=/commands/velocity
+Teleop turtlebot
+
+Launch:
+source ~/.ros_venv/bin/activate
+ros2 launch bph_statemachine fakenavdemo.launch.py
+
+Window 2:
+cd ~/sandbox/src/block-painting-helper/
+python3 mocknav
+
+
 Smoke-testing the state machine
 ================================
 
@@ -6,12 +24,8 @@ State diagram: state_machine.png / state_machine.pdf
 Start the node:
   ros2 run bph_statemachine simple_sm_node
 
-Optionally watch live state transitions:
+Optionally watch live state transitions: (not on kilted)
   ros2 run smach_viewer smach_viewer
-
-For each transition below: the left column is what drives it, and the
-right column is the manual command to use when the real driver isn't running.
-
 ─────────────────────────────────────────────────────────────────────────────
 WAIT → RETRIEVING_OBJECT
 

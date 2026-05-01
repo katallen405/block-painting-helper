@@ -183,9 +183,9 @@ class _FetchState(smach.State):
         return result[0]
 
     def _wait_for_button(self):
-        """Block until a String message arrives on /button; return its payload."""
+        """Block until a String message arrives on /requestedmaterial from the UI; return its payload."""
         latch = _Latch()
-        sub = self._node.create_subscription(String, "/button", latch.callback, 10)
+        sub = self._node.create_subscription(String, "/requestedmaterial", latch.callback, 10)
         value = latch.wait()
         self._node.destroy_subscription(sub)
         return value

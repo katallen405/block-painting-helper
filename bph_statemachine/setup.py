@@ -11,6 +11,7 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', ['launch/demo.launch.py']),
+        ('share/' + package_name + '/launch', ['launch/fakenavdemo.launch.py']),
         ('share/' + package_name + '/launch', ['launch/arm.launch.py']),
     ],
     install_requires=['setuptools'],

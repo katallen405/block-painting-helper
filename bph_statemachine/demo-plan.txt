@@ -1,0 +1,62 @@
+Jigglypuff (in ssh so it can be relaunched when DDS crashes everything)
+ros2 launch rosbridge_server rosbridge_websocket_launch.xml port:=9405
+
+python3 /home/katallen/sandbox/src/block-painting-helper/bph_userinterface/bph_ui_server.py (already running) 
+
+
+Turtlebot:
+ssh 10.5.10.71
+ssh -L 9090:localhost:9090 baymax@10.5.10.74
+ros2 launch turtlebot_bringup.launch.py
+
+Second Turtlebot:
+ssh baymax@10.5.10.74
+ros2 run kobuki_keyop kobuki_keyop_node --ros-args -r /cmd_vel:=/commands/velocity
+Teleop turtlebot from here
+
+Launch:
+source ~/.ros_venv/bin/activate
+ros2 launch bph_statemachine fakenavdemo.launch.py
+(also starts state machine)
+
+Window 2:
+cd ~/sandbox/src/block-painting-helper/
+python3 mocknav
+
+Open window on TB to 
+http://10.5.10.71:8080/humanrequest
+connect to 10.5.10.71:9405
+
+Open window on desktop to:
+http://10.5.10.71:8080/
+
+if needed: switch ros2 controller to forward_effort_control
+ros2 service call /virtual_spring_node/add_spring \
+    springcontroller_interfaces/srv/AddSpring "{
+        name: 'my_spring',
+        link_name: 'tool0_control',
+        local_point: [0.0, 0.0, 0.0],
+        target:  [-0.345, -0.161,0.138],
+        stiffness: 50.0,
+        damping: 0.0,
+        rest_length: 0.0,
+        inner_radius: 0.0,
+        outer_radius: 0.0
+    }"
+In a local machine window:
+ros2 run v4l2_camera v4l2_camera_node  --ros-args -r image_raw:=/bph_overhead_camera/image_raw -r video_device:='/dev/video0'
+
+to see colorpicker:
+ros2 run rqt_image_view rqt_image_view /color_picker/debug_image
+
+DO:
+Play with springcontroller
+- press button to request object
+- drive turtlebot over to somewhere
+- press yes button and put block on the turtlebot
+- teleop the turtlebot back to the arm
+- wait for moveit
+- fake gripper:
+ros2 topic pub --once /button std_msgs/msg/String "{data: 'go'}"
+- arm moves back to workspace
+
