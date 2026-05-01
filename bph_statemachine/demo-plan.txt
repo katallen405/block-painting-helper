@@ -3,7 +3,6 @@ ros2 launch rosbridge_server rosbridge_websocket_launch.xml port:=9405
 
 python3 /home/katallen/sandbox/src/block-painting-helper/bph_userinterface/bph_ui_server.py (already running) 
 
-
 Turtlebot:
 ssh 10.5.10.71
 ssh -L 9090:localhost:9090 baymax@10.5.10.74
