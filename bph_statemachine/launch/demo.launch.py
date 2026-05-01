@@ -36,6 +36,7 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch.substitutions import EnvironmentVariable, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch.actions import TimerAction
 
 
 def generate_launch_description():
@@ -45,6 +46,7 @@ def generate_launch_description():
     bph_sm_pkg  = get_package_share_directory("bph_statemachine")
     moveit_pkg = get_package_share_directory("ur_moveit_config")
     nav2_pkg = get_package_share_directory("nav2_bringup")
+    slam_pkg = get_package_share_directory("slam_toolbox")
     
     # ── Inject venv site-packages so all nodes pick up extra dependencies ────
     _venv_site = (
@@ -57,6 +59,13 @@ def generate_launch_description():
         value=_venv_site + ":" + os.environ.get("PYTHONPATH", ""),
     )
 
+    setcyclone = SetEnvironmentVariable(
+        SetEnvironmentVariable(
+            name="CYCLONEDDS_URI",
+            value="<CycloneDDS><Domain><Discovery><TypeLookupService><Enable>false</Enable></TypeLookupService></Discovery></Domain></CycloneDDS>"
+        )
+
+        
     # ── Shared / navigation args ─────────────────────────────────────────────
     use_sim_time_arg = DeclareLaunchArgument(
         "use_sim_time", default_value="false",
@@ -133,7 +142,7 @@ def generate_launch_description():
     springconfig_arg = DeclareLaunchArgument(
         "springconfig",
         default_value=PathJoinSubstitution([EnvironmentVariable("ROS_WS", default_value="/home/katallen/sandbox"),
-            "src/springcontroller/springcontroller/config/springs.yaml"
+            "src/springcontroller/springcontroller/config/demosprings.yaml"
     ]),
     )
             
@@ -188,6 +197,17 @@ def generate_launch_description():
         }.items(),
     )
 
+    slam_bringup = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(slam_pkg,
+                         "launch",
+                         "online_async_launch.py")
+        ),
+            launch_arguments={
+                "use_sim_time": use_sim_time,
+            }.items(),
+            )
+    
     # IncludeLaunchDescription(
     #     PythonLaunchDescriptionSource(
     #         os.path.join(nav_pkg, "launch", "bringup.launch.py")
@@ -228,8 +248,8 @@ def generate_launch_description():
     # ── 4. Arm pick-and-place action server ───────────────────────────────────
     pickmeup_node = Node(
         package="bph_pickmeup",
-        executable="bph_pickmeup_node",
-        name="bph_pickmeup",
+        executable="bph_pickmeup_actionserver",
+        name="bph_pickmeup_action",
         output="screen",
     )
 
@@ -260,7 +280,8 @@ def generate_launch_description():
             "torque_topic":  LaunchConfiguration("torque_topic"),
             "command_topic": LaunchConfiguration("command_topic"),
             "kinematics_params": LaunchConfiguration("kinematics_params"),
-            "use_fake_hardware": LaunchConfiguration("use_fake_hardware")
+            "use_fake_hardware": LaunchConfiguration("use_fake_hardware"),
+            "springconfig": LaunchConfiguration("springconfig")
         }.items(),
     )
 
@@ -286,6 +307,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         set_pythonpath,             # must come first
+        setcyclone,
         # declare all args
         use_sim_time_arg,
         params_file_arg,
@@ -322,9 +344,18 @@ def generate_launch_description():
         LogInfo(msg="[demo] Starting ROSBridge ..."),
         turtlebridge_bringup,
 
-        LogInfo(msg="[demo] Starting Nav2 + SLAM + navigator_node ..."),
-        nav_bringup,
+        LogInfo(msg="[demo] Starting Nav2 + SLAM ..."),
+        TimerAction(
+            period=5.0,
+            actions=[slam_bringup],
+            ),
+        
+        TimerAction(
+            period=5.0,
+            actions=[nav_bringup],
+        ),
 
+        
         LogInfo(msg="[demo] Check that v4l2_camera is loaded..."),
         #camera_bringup,
 
@@ -336,7 +367,7 @@ def generate_launch_description():
         arm_bringup,
 
         # LogInfo(msg="[demo] Starting UR3e MoveIt ..."),
-        # moveit_bringup,   # TODO: fill in moveit_bringup above
+         moveit_bringup, 
 
         LogInfo(msg="[demo] Starting arm pick-and-place server ..."),
         pickmeup_node,

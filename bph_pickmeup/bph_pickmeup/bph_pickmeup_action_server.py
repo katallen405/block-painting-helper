@@ -52,8 +52,11 @@ JOINT_NAMES = [
 
 # Named positions registry
 NAMED_POSITIONS: dict[str, list[float]] = {
+    # joint angles in radians
     "home":      [0.0, -1.5707, 0.0, -1.5707, 0.0, 0.0],
-    "pre_grasp": [0.0, -1.2000, 0.5, -1.8000, 0.0, 0.0],
+    "pre_grasp": [0.2269, 0.447, -2.57, -2.295, -1.554, 0.0],  
+    "workspace": [-2.05, -2.37, -2.30, -1.106, 0.00, 0.00],
+}
     # add more named positions here
 }
 

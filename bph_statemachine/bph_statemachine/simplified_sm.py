@@ -56,11 +56,11 @@ class RobotFetchNode(Node):
     def __init__(self):
         super().__init__("robot_fetch_smach")
 
-        self.declare_parameter("home_x", 0.0)
-        self.declare_parameter("home_y", 0.0)
+        self.declare_parameter("home_x", 0.365)
+        self.declare_parameter("home_y", -0.195)
         self.declare_parameter("home_yaw", 0.0)
-        self.declare_parameter("supply_closet_x", 1.0)
-        self.declare_parameter("supply_closet_y", 0.0)
+        self.declare_parameter("supply_closet_x", 2.6)
+        self.declare_parameter("supply_closet_y", -0.195)
         self.declare_parameter("supply_closet_yaw", 0.0)
 
         self.requested_object_color = "red"
@@ -320,10 +320,8 @@ class LocatingObjectAndPeople(_FetchState):
 class PickAndPlace(_FetchState):
     """
     Move the arm to the grasp position.
-    If color_picker returned a pose, use the MoveToPose service (Cartesian move).
+    If color_picker returned a pose, use the MoveToPose service (Cartesian move)
     If perception failed, fall back to the named 'pre_grasp' position.
-
-    TODO: MoveToPose service server is not yet implemented in bph_pickmeup.
     """
 
     def __init__(self, node: RobotFetchNode, pickmeup_client: BphPickmeupClient):
