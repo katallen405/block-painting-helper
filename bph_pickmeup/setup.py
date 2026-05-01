@@ -13,14 +13,15 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='your name',
-    maintainer_email='your@email.com',
-    description='TODO',
-    license='TODO',
+    maintainer='Katherine (Kat) Allen',
+    maintainer_email='kat.allen@tufts.edu',
+    description='Moveit wrapper for action server',
+    license='MIT',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'bph_pickmeup_node = bph_pickmeup.bph_pickmeup:main',
+            'bph_pickmeup_actionserver = bph_pickmeup.bph_pickmeup_action_server:main',
+            'bph_pickmeup_client = bph_pickmeup.bph_pickmeup_client:main',
         ],
     },
 )

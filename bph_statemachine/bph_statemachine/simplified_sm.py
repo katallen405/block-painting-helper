@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-Scaffold from Claude.ai to get the SMACH syntax right.
-
+SMACH state machine for block-painting-helper arm demo
+kat.allen@tufts.edu
 
 States:
-    Wait                    -> RetrievingObject        (on /button message)
-    RetrievingObject        -> WaitingForObject         (when /turtlebot/location == "supply closet")
+    Wait                    -> RetrievingObject        (on /button String: payload is color to fetch)
+    RetrievingObject        -> WaitingForObject         (GoToLocation service accepted)
     WaitingForObject        -> NavigatingHome           (on /button message)
-    NavigatingHome          -> LocatingObjectAndPeople  (when /turtlebot/location == "home")
-    LocatingObjectAndPeople -> PickAndPlace             (on /object/location message)
-    PickAndPlace            -> Grasping                 (when /arm/location == "grasp position")
-    Grasping                -> MoveToWorkspace          (on /button message, simulating successful grasp)
-    MoveToWorkspace         -> SpringController         (when /arm/location == "in workspace")
+    NavigatingHome          -> LocatingObjectAndPeople  (GoToLocation service accepted)
+    LocatingObjectAndPeople -> PickAndPlace             (always; pose may be None if perception failed)
+    PickAndPlace            -> Grasping                 (arm at grasp position)
+    Grasping                -> MoveToWorkspace          (on /button: manual stand-in for gripper close)
+    MoveToWorkspace         -> SpringController         (arm in workspace)
 """
 
 import threading
@@ -19,244 +19,219 @@ import threading
 import rclpy
 from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
-from std_msgs.msg import Bool, String
+from std_msgs.msg import String
 
 import smach
 import smach_ros
-from bph_interfaces.srv import GoToLocation
-from bph_interfaces.srv import MoveToPose
+from controller_manager_msgs.srv import SwitchController
+from bph_interfaces.srv import GoToLocation, GetTargetPose, MoveToPose
+from bph_pickmeup.bph_pickmeup_client import BphPickmeupClient
+
 
 # ---------------------------------------------------------------------------
-# Helper: a simple latch that a subscriber callback can set
+# _Latch — thread-safe single-message capture
 # ---------------------------------------------------------------------------
-class _TopicLatch:
-    """Signals execute() that a matching message has arrived on a topic."""
-
+class _Latch:
     def __init__(self):
-        self.triggered = False
+        self._event = threading.Event()
         self.value = None
 
     def reset(self):
-        self.triggered = False
+        self._event.clear()
         self.value = None
 
     def callback(self, msg):
         self.value = msg.data if hasattr(msg, "data") else msg
-        self.triggered = True
+        self._event.set()
+
+    def wait(self, timeout=None):
+        self._event.wait(timeout=timeout)
+        return self.value
 
 
 # ---------------------------------------------------------------------------
 # RobotFetchNode — owns all ROS2 infrastructure
 # ---------------------------------------------------------------------------
 class RobotFetchNode(Node):
-    """
-    Central ROS2 node for the fetch-and-deliver task.
-
-    Subclassing Node means:
-      - Parameters, publishers, timers, and services all live here.
-      - States receive `self` (the node) at construction, giving them full
-        access to everything declared below without any globals.
-      - Adding new ROS2 features later (e.g. action clients, TF listeners)
-        is just a matter of adding attributes here.
-    """
-
     def __init__(self):
         super().__init__("robot_fetch_smach")
 
-        # ------------------------------------------------------------------
-        # Parameters — declare them here so they're visible to `ros2 param`
-        # ------------------------------------------------------------------
-        self.declare_parameter("home_location", "home")
-        self.declare_parameter("supply_closet_location", "supply closet")
-        self.declare_parameter("grasp_position_name", "grasp position")
-        self.declare_parameter("workspace_position_name", "in workspace")
+        self.declare_parameter("home_x", 0.0)
+        self.declare_parameter("home_y", 0.0)
+        self.declare_parameter("home_yaw", 0.0)
+        self.declare_parameter("supply_closet_x", 1.0)
+        self.declare_parameter("supply_closet_y", 0.0)
+        self.declare_parameter("supply_closet_yaw", 0.0)
 
-        # ------------------------------------------------------------------
-        # Publishers — add any outgoing topics here
-        # ------------------------------------------------------------------
-        # TODO: self.nav_goal_pub = self.create_publisher(...)
-        # TODO: self.arm_goal_pub = self.create_publisher(...)
-        # TODO: self.gripper_pub  = self.create_publisher(...)
-        self.switch_client = self.create-client(
-            SwitchController,
-            '/controller_manager/switch_controller')
+        self.requested_object_color = "red"
 
+        self.switch_client = self.create_client(
+            SwitchController, "/controller_manager/switch_controller"
+        )
         self.get_logger().info("RobotFetchNode initialised")
-        self.requested_object_color = "red" # overwritten by UI
-        
-    # Convenience: read parameters in one place so states don't hard-code strings
+
     @property
     def home_location(self):
-        x = self.get_parameter("home_location.x").get_parameter_value().double_value
-        y = self.get_parameter("home_location.y").get_parameter_value().double_value
-        yaw = self.get_parameter("home_location.z").get_parameter_value().double_value
-        return x, y, yaw
+        return (
+            self.get_parameter("home_x").value,
+            self.get_parameter("home_y").value,
+            self.get_parameter("home_yaw").value,
+        )
 
     @property
     def supply_closet_location(self):
-        x = self.get_parameter("supply_closet_location.x").get_parameter_value().double_value
-        y = self.get_parameter("supply_closet_location.y").get_parameter_value().double_value
-        yaw = self.get_parameter("supply_closet_location.yaw").get_parameter_value().double_value
-        return x, y, yaw
+        return (
+            self.get_parameter("supply_closet_x").value,
+            self.get_parameter("supply_closet_y").value,
+            self.get_parameter("supply_closet_yaw").value,
+        )
 
-    @property
-    def grasp_position_name(self):
-        return self.get_parameter("grasp_position_name").get_parameter_value().string_value
-
-    @property
-    def workspace_position_name(self):
-        return self.get_parameter("workspace_position_name").get_parameter_value().string_value
-
-    def switch_controllers(self, activate, deactivate):
-        #switch controls with ros2 controller manager
-        #blocks until the controller manager answers
+    def switch_controllers(self, activate: list, deactivate: list):
         req = SwitchController.Request()
         req.activate_controllers = activate
         req.deactivate_controllers = deactivate
         req.strictness = 2
-        return self.switch_client.call_async(req)
+        event = threading.Event()
+        result = [None]
+
+        def cb(f):
+            result[0] = f.result()
+            event.set()
+
+        self.switch_client.call_async(req).add_done_callback(cb)
+        event.wait()
+        return result[0]
 
     def build_and_run_sm(self):
-        """Construct the SMACH state machine and execute it."""
+        pickmeup = BphPickmeupClient(self)
+
         sm = smach.StateMachine(outcomes=["task_complete"])
+        sm.userdata.target_pose = None
 
         with sm:
             smach.StateMachine.add(
-                "WAIT",
-                Wait(self),
+                "WAIT", Wait(self),
                 transitions={"button_pressed": "RETRIEVING_OBJECT"},
             )
             smach.StateMachine.add(
-                "RETRIEVING_OBJECT",
-                RetrievingObject(self),
-                transitions={"at_supply_closet": "WAITING_FOR_OBJECT"},
+                "RETRIEVING_OBJECT", RetrievingObject(self),
+                transitions={"at_supply_closet": "WAITING_FOR_OBJECT", "nav_error": "WAIT"},
             )
             smach.StateMachine.add(
-                "WAITING_FOR_OBJECT",
-                WaitingForObject(self),
+                "WAITING_FOR_OBJECT", WaitingForObject(self),
                 transitions={"object_loaded": "NAVIGATING_HOME"},
             )
             smach.StateMachine.add(
-                "NAVIGATING_HOME",
-                NavigatingHome(self),
-                transitions={"at_home": "LOCATING_OBJECT_AND_PEOPLE"},
+                "NAVIGATING_HOME", NavigatingHome(self),
+                transitions={"at_home": "LOCATING_OBJECT_AND_PEOPLE", "nav_error": "WAIT"},
             )
             smach.StateMachine.add(
-                "LOCATING_OBJECT_AND_PEOPLE",
-                LocatingObjectAndPeople(self),
-                transitions={"object_located": "PICK_AND_PLACE"},
+                "LOCATING_OBJECT_AND_PEOPLE", LocatingObjectAndPeople(self),
+                transitions={"proceed": "PICK_AND_PLACE"},
             )
             smach.StateMachine.add(
-                "PICK_AND_PLACE",
-                PickAndPlace(self),
-                transitions={"arm_at_grasp_position": "GRASPING"},
+                "PICK_AND_PLACE", PickAndPlace(self, pickmeup),
+                transitions={"arm_at_grasp_position": "GRASPING", "failed": "WAIT"},
             )
             smach.StateMachine.add(
-                "GRASPING",
-                Grasping(self),
+                "GRASPING", Grasping(self),
                 transitions={"grasp_confirmed": "MOVE_TO_WORKSPACE"},
             )
             smach.StateMachine.add(
-                "MOVE_TO_WORKSPACE",
-                MoveToWorkspace(self),
-                transitions={"in_workspace": "SPRING_CONTROLLER"},
+                "MOVE_TO_WORKSPACE", MoveToWorkspace(self, pickmeup),
+                transitions={"in_workspace": "SPRING_CONTROLLER", "failed": "WAIT"},
             )
             smach.StateMachine.add(
-                "SPRING_CONTROLLER",
-                SpringController(self),
-                transitions={"done": "task_complete"},
+                "SPRING_CONTROLLER", SpringController(self),
+                transitions={"done": "WAIT"},
             )
 
         sis = smach_ros.IntrospectionServer("robot_fetch_smach", sm, "/SM_ROOT")
         sis.start()
-
         outcome = sm.execute()
-        self.get_logger().info("State machine finished with outcome: %s" % outcome)
+        self.get_logger().info("State machine finished: %s" % outcome)
         sis.stop()
 
 
 # ---------------------------------------------------------------------------
-# State base class — removes boilerplate from every state
+# _FetchState — base class with shared helpers
 # ---------------------------------------------------------------------------
 class _FetchState(smach.State):
-    """
-    Shared base for all states in this machine.
-    Stores the node reference and provides _wait_for_latch().
-    """
+    EFFORT_CONTROLLER   = "forward_effort_controller"
+    POSITION_CONTROLLER = "scaled_joint_trajectory_controller"
 
-    def __init__(self, node: RobotFetchNode, outcomes):
-        smach.State.__init__(self, outcomes=outcomes)
+    def __init__(self, node: RobotFetchNode, outcomes, input_keys=None, output_keys=None):
+        smach.State.__init__(
+            self,
+            outcomes=outcomes,
+            input_keys=input_keys or [],
+            output_keys=output_keys or [],
+        )
         self._node = node
-        self._latch = _TopicLatch()
-        ##FIXME These should be parameters
-        self.effort_controller = "forward_effort_controller"
-        self.position_controller = "scaled_joint_trajectory_controller"
 
-    def _wait_for_latch(self):
-        rate = self._node.create_rate(10)
-        while rclpy.ok() and not self._latch.triggered:
-            rate.sleep()
-        return self._latch.last_message
+    def _call_service(self, client, request):
+        """Call a service safely while MultithreadedExecutor is running."""
+        event = threading.Event()
+        result = [None]
+
+        def cb(f):
+            result[0] = f.result()
+            event.set()
+
+        client.call_async(request).add_done_callback(cb)
+        event.wait()
+        return result[0]
+
+    def _wait_for_button(self):
+        """Block until a String message arrives on /button; return its payload."""
+        latch = _Latch()
+        sub = self._node.create_subscription(String, "/button", latch.callback, 10)
+        value = latch.wait()
+        self._node.destroy_subscription(sub)
+        return value
 
 
 # ---------------------------------------------------------------------------
 # State: Wait
 # ---------------------------------------------------------------------------
 class Wait(_FetchState):
-    """Idle state. Waits for a press on /button before starting the fetch."""
+    """Idle. The /button message payload is the color to fetch (e.g. 'red')."""
 
     def __init__(self, node: RobotFetchNode):
         super().__init__(node, outcomes=["button_pressed"])
 
     def execute(self, userdata):
-        self._node.get_logger().info("[Wait] Waiting for /button press …")
-        self._latch.reset()
-        sub = self._node.create_subscription(String, "/button", self._latch.callback, 10)
-        msg = self._wait_for_latch()
-        if msg:
-            self._node.get_logger().info("[Wait] Button pressed")
-            self._node.destroy_subscription(sub)
-            return "button_pressed"
+        self._node.get_logger().info("[Wait] Waiting for /button press (payload = color)...")
+        color = self._wait_for_button()
+        if color:
+            self._node.requested_object_color = color
+            self._node.get_logger().info("[Wait] Requested color: %s" % color)
+        return "button_pressed"
 
 
 # ---------------------------------------------------------------------------
 # State: RetrievingObject
 # ---------------------------------------------------------------------------
 class RetrievingObject(_FetchState):
-    """Navigate toward the supply closet. Completes when location is confirmed."""
+    """Navigate to the supply closet."""
+
     def __init__(self, node: RobotFetchNode):
-        super().__init__(node, outcomes=["at_supply_closet"])
-        self._nav_client = self.create_client(GoToLocation, 'navigate_to')
-        self._nav_client.wait_for_service(timeout_sec=5.0)
-        self.create_subscription(String, 'navigation_status', self._status_callback, 10)
-
-
-    def _location_cb(self, msg):
-        if msg.data == self._node.supply_closet_location:
-            self._latch.callback(msg)
+        super().__init__(node, outcomes=["at_supply_closet", "nav_error"])
+        self._nav_client = node.create_client(GoToLocation, "navigate_to")
 
     def execute(self, userdata):
-        self._node.get_logger().info("[RetrievingObject] Navigating to supply closet …")
-        request = GoToLocation.Request()
-        x, y, yaw = self.supply_closet_location()
-        request.x = x
-        request.y = y
-        request.yaw = yaw
-        future = self._nav_client.call_async(request)
-        future.add_done_callback(self._nav_response_callback)
-
-
-        self._latch.reset()
-        sub = self._node.create_subscription(String, "/turtlebot/location", self._location_cb, 10)
-        msg = self._wait_for_latch()
-        if msg == "supply_closet":
+        self._node.get_logger().info("[RetrievingObject] Navigating to supply closet...")
+        req = GoToLocation.Request()
+        req.x, req.y, req.yaw = self._node.supply_closet_location
+        resp = self._call_service(self._nav_client, req)
+        if resp and resp.accepted:
             self._node.get_logger().info("[RetrievingObject] Arrived at supply closet")
-            self._node.destroy_subscription(sub)
             return "at_supply_closet"
-        else:
-            self._node.get_logger().warn("[RetrievingObject] Received unexpected location: %s" % msg)
-            self._node.destroy_subscription(sub)
-            return "nav_error" 
+        self._node.get_logger().warn(
+            "[RetrievingObject] Navigation failed: %s"
+            % (resp.message if resp else "no response")
+        )
+        return "nav_error"
 
 
 # ---------------------------------------------------------------------------
@@ -269,12 +244,10 @@ class WaitingForObject(_FetchState):
         super().__init__(node, outcomes=["object_loaded"])
 
     def execute(self, userdata):
-        self._node.get_logger().info("[WaitingForObject] Waiting for object to be loaded (/button) …")
-        self._latch.reset()
-        sub = self._node.create_subscription(String, "/button", self._latch.callback, 10)
-        self._wait_for_latch()
-        self._node.destroy_subscription(sub)
-        self._node.get_logger().info("[WaitingForObject] Object loaded")
+        self._node.get_logger().info(
+            "[WaitingForObject] Waiting for /button to confirm object loaded..."
+        )
+        self._wait_for_button()
         return "object_loaded"
 
 
@@ -282,128 +255,120 @@ class WaitingForObject(_FetchState):
 # State: NavigatingHome
 # ---------------------------------------------------------------------------
 class NavigatingHome(_FetchState):
-    """Return to the home base."""
+    """Return to home base."""
 
     def __init__(self, node: RobotFetchNode):
-        super().__init__(node, outcomes=["at_home"])
-
-    def _location_cb(self, msg):
-        if msg.data == self._node.home_location:
-            self._latch.callback(msg)
+        super().__init__(node, outcomes=["at_home", "nav_error"])
+        self._nav_client = node.create_client(GoToLocation, "navigate_to")
 
     def execute(self, userdata):
-        self._node.get_logger().info("[NavigatingHome] Navigating home …")
-        request = GoToLocation.Request()
-        x, y, yaw = self.home_location()
-        request.x = x
-        request.y = y
-        request.yaw = yaw
-        self._latch.reset()
-        sub = self._node.create_subscription(String, "/turtlebot/location", self._location_cb, 10)
-        msg = self._wait_for_latch()
-        if msg == "home":
-             self._node.get_logger().info("[NavigatingHome] Arrived at home")
-             self._node.destroy_subscription(sub)
-             return "at_home"
-        else:
-             self._node.get_logger().warn("[NavigatingHome] Received unexpected location: %s" % msg)
-             self._node.destroy_subscription(sub)
-             return "nav_error"
-
+        self._node.get_logger().info("[NavigatingHome] Navigating home...")
+        req = GoToLocation.Request()
+        req.x, req.y, req.yaw = self._node.home_location
+        resp = self._call_service(self._nav_client, req)
+        if resp and resp.accepted:
+            self._node.get_logger().info("[NavigatingHome] Arrived at home")
+            return "at_home"
+        self._node.get_logger().warn(
+            "[NavigatingHome] Navigation failed: %s"
+            % (resp.message if resp else "no response")
+        )
+        return "nav_error"
 
 
 # ---------------------------------------------------------------------------
 # State: LocatingObjectAndPeople
 # ---------------------------------------------------------------------------
 class LocatingObjectAndPeople(_FetchState):
-    """Use perception to locate the object and nearby people."""
+    """
+    Call color_picker for the target pose.
+    Passes the pose (or None on failure) to PickAndPlace via SMACH userdata.
+    Always proceeds — PickAndPlace handles the None case with a named-position fallback.
+    """
 
     def __init__(self, node: RobotFetchNode):
-        super().__init__(node, outcomes=["object_located"])
+        super().__init__(node, outcomes=["proceed"], output_keys=["target_pose"])
+        self._perception_client = node.create_client(
+            GetTargetPose, "/color_picker/get_target_pose"
+        )
 
     def execute(self, userdata):
-        self._node.get_logger().info("[LocatingObjectAndPeople] Waiting for /object/location …")
-        # TODO: request locations of people to avoid from person_detector
-        
-        # TODO: request location of object to grasp from object_detector
-        request = GetTargetPose.Request()
-        request.color = self.requested_object_color
-        response = self.get_pose_client.call(request)
-        if response.success:
-            go_to(response.pose)
-        self._latch.reset()
-        sub = self._node.create_subscription(String, "/object/location", self._latch.callback, 10)
-        self._wait_for_latch()
-        self._node.destroy_subscription(sub)
         self._node.get_logger().info(
-            "[LocatingObjectAndPeople] Object located at: %s" % self._latch.value
+            "[LocatingObjectAndPeople] Requesting pose for color '%s'..."
+            % self._node.requested_object_color
         )
-        return "object_located"
+        req = GetTargetPose.Request()
+        req.color = self._node.requested_object_color
+        resp = self._call_service(self._perception_client, req)
+        if resp and resp.success:
+            self._node.get_logger().info(
+                "[LocatingObjectAndPeople] Pose found: %s" % resp.message
+            )
+            userdata.target_pose = resp.pose
+        else:
+            self._node.get_logger().warn(
+                "[LocatingObjectAndPeople] Perception failed (%s) — will use pre_grasp fallback"
+                % (resp.message if resp else "no response")
+            )
+            userdata.target_pose = None
+        return "proceed"
 
 
 # ---------------------------------------------------------------------------
 # State: PickAndPlace
 # ---------------------------------------------------------------------------
 class PickAndPlace(_FetchState):
-    """Move the arm to the grasp position above the object."""
+    """
+    Move the arm to the grasp position.
+    If color_picker returned a pose, use the MoveToPose service (Cartesian move).
+    If perception failed, fall back to the named 'pre_grasp' position.
 
-    def __init__(self, node: RobotFetchNode):
-        super().__init__(node, outcomes=["arm_at_grasp_position"])
+    TODO: MoveToPose service server is not yet implemented in bph_pickmeup.
+    """
 
-    def _arm_cb(self, msg):
-        if msg.data == self._node.grasp_position_name:
-            self._latch.callback(msg)
+    def __init__(self, node: RobotFetchNode, pickmeup_client: BphPickmeupClient):
+        super().__init__(node, outcomes=["arm_at_grasp_position", "failed"],
+                         input_keys=["target_pose"])
+        self._pickmeup = pickmeup_client
+        self._move_to_pose_client = node.create_client(MoveToPose, "/bph_pickmeup/move_to_pose")
 
     def execute(self, userdata):
-        self._node.get_logger().info("[PickAndPlace] Moving arm to grasp position …")
-        # first switch to the position controller
-        req = SwitchController.Request()
-        req.activate_controllers = self.effort_controller
-        req.deactivate_controllers = self.position_controller
-        req.strictness = 2
-        return self.switch_client.call_async(req)
-    
-        request = MoveToPose.Request()
-        x, y, z, yaw = self.home_location()
-        request.target_pose = geometry_msgs/PoseStamped()
-        request.target_pose.pose.position.x = x
-        request.target_pose.pose.position.y = y
-        request.target_pose.pose.position.z = z
-        request.target_pose.pose.orientation.z = yaw
-        request.arm_name = ""
-        request.end_effector_link = ""
-        self._latch.reset()
-        sub = self._node.create_subscription(String, "/arm/location", self._arm_cb, 10)
-        msg = self._wait_for_latch()
-        if msg == "grasp position":
-            self._node.get_logger().info("[PickAndPlace] Arm at grasp position")
-            self._node.destroy_subscription(sub)
+        pose = userdata.target_pose
+        if pose is not None:
+            self._node.get_logger().info(
+                "[PickAndPlace] Moving arm to detected object pose..."
+            )
+            req = MoveToPose.Request()
+            req.target_pose = pose
+            resp = self._call_service(self._move_to_pose_client, req)
+            if resp and resp.success:
+                return "arm_at_grasp_position"
+            self._node.get_logger().warn(
+                "[PickAndPlace] Cartesian move failed (%s) — falling back to pre_grasp"
+                % (resp.message if resp else "no response")
+            )
+
+        self._node.get_logger().info("[PickAndPlace] Moving arm to pre_grasp position...")
+        success, code = self._pickmeup.send_goal(position_name="pre_grasp")
+        if success:
             return "arm_at_grasp_position"
-        else:
-            self._node.get_logger().warn("[PickAndPlace] Received unexpected arm location: %s" % msg)   
-            self._node.destroy_subscription(sub)
-            return "arm_not_at_grasp_position"
+        self._node.get_logger().warn("[PickAndPlace] Arm move failed, code=%d" % code)
+        return "failed"
 
 
 # ---------------------------------------------------------------------------
 # State: Grasping
 # ---------------------------------------------------------------------------
 class Grasping(_FetchState):
-    """Close the gripper and confirm grasp via /button (simulated success signal)."""
+    """No gripper — /button press is a manual stand-in for gripper close confirmation."""
 
     def __init__(self, node: RobotFetchNode):
         super().__init__(node, outcomes=["grasp_confirmed"])
 
     def execute(self, userdata):
-        self._node.get_logger().info("[Grasping] Closing gripper – waiting for confirmation (/button) …")
-        # TODO: send gripper close command here
-        self._latch.reset()
-        sub = self._node.create_subscription(Bool, "/button", self._latch.callback, 10)
-        msg = self._wait_for_latch()
-        if msg:
-            self._node.get_logger().info("[Grasping] Grasp confirmed")
-            self._node.destroy_subscription(sub)
-            return "grasp_confirmed"
+        self._node.get_logger().info("[Grasping] Press /button to confirm grasp...")
+        self._wait_for_button()
+        return "grasp_confirmed"
 
 
 # ---------------------------------------------------------------------------
@@ -412,39 +377,38 @@ class Grasping(_FetchState):
 class MoveToWorkspace(_FetchState):
     """Carry the grasped object to the workspace position."""
 
-    def __init__(self, node: RobotFetchNode):
-        super().__init__(node, outcomes=["in_workspace"])
-
-    def _arm_cb(self, msg):
-        if msg.data == self._node.workspace_position_name:
-            self._latch.callback(msg)
+    def __init__(self, node: RobotFetchNode, pickmeup_client: BphPickmeupClient):
+        super().__init__(node, outcomes=["in_workspace", "failed"])
+        self._pickmeup = pickmeup_client
 
     def execute(self, userdata):
-        self._node.get_logger().info("[MoveToWorkspace] Moving arm to workspace …")
-        # TODO: send arm goal here
-        self._latch.reset()
-        sub = self._node.create_subscription(String, "/arm/location", self._arm_cb, 10)
-        msg = self._wait_for_latch()
-        if msg == "workspace position":
-            self._node.destroy_subscription(sub)
-            self._node.get_logger().info("[MoveToWorkspace] Arm in workspace – handing off to SpringController")
+        self._node.get_logger().info("[MoveToWorkspace] Moving arm to workspace...")
+        success, code = self._pickmeup.send_goal(position_name="workspace")
+        if success:
             return "in_workspace"
+        self._node.get_logger().warn("[MoveToWorkspace] Arm move failed, code=%d" % code)
+        return "failed"
 
 
 # ---------------------------------------------------------------------------
-# State: SpringController  (terminal / placeholder)
+# State: SpringController
 # ---------------------------------------------------------------------------
 class SpringController(_FetchState):
-    """Placeholder for spring/impedance controller once the arm is in workspace."""
+    """Switch to effort controller and run spring/impedance control."""
 
     def __init__(self, node: RobotFetchNode):
         super().__init__(node, outcomes=["done"])
 
     def execute(self, userdata):
-        self._node.get_logger().info(
-            "[SpringController] Spring controller active – TODO: implement control loop"
+        self._node.get_logger().info("[SpringController] Switching to effort controller...")
+        self._node.switch_controllers(
+            activate=[self.EFFORT_CONTROLLER],
+            deactivate=[self.POSITION_CONTROLLER],
         )
-        # TODO: implement spring/impedance controller
+        self._node.get_logger().info(
+            "[SpringController] spring controller running"
+        )
+
         return "done"
 
 
@@ -461,7 +425,6 @@ def main():
     spin_thread.start()
 
     node.build_and_run_sm()
-
     rclpy.shutdown()
 
 

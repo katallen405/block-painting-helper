@@ -1,0 +1,41 @@
+digraph block_painting_helper {
+    rankdir=TB
+    bgcolor="#f8f8f8"
+    fontname="Helvetica"
+    node [fontname="Helvetica" fontsize=12 style=filled shape=box penwidth=1.5]
+    edge [fontname="Helvetica" fontsize=10 penwidth=1.2]
+
+    // ── Terminal ────────────────────────────────────────────────────────────
+    task_complete [label="task_complete" shape=doublecircle fillcolor="#2e7d32" fontcolor=white fontsize=13]
+
+    // ── States ──────────────────────────────────────────────────────────────
+    WAIT [label="WAIT\n(idle)" fillcolor="#1565c0" fontcolor=white]
+    RETRIEVING_OBJECT [label="RETRIEVING_OBJECT\n(nav → supply closet)" fillcolor="#4a90d9" fontcolor=white]
+    WAITING_FOR_OBJECT [label="WAITING_FOR_OBJECT\n(wait for block load)" fillcolor="#4a90d9" fontcolor=white]
+    NAVIGATING_HOME [label="NAVIGATING_HOME\n(nav → home)" fillcolor="#4a90d9" fontcolor=white]
+    LOCATING_OBJECT_AND_PEOPLE [label="LOCATING_OBJECT_AND_PEOPLE\n(color_picker → pose)" fillcolor="#7b61d9" fontcolor=white]
+    PICK_AND_PLACE [label="PICK_AND_PLACE\n(arm → grasp pos)" fillcolor="#b05000" fontcolor=white]
+    GRASPING [label="GRASPING\n(button confirm)" fillcolor="#b05000" fontcolor=white]
+    MOVE_TO_WORKSPACE [label="MOVE_TO_WORKSPACE\n(arm → workspace)" fillcolor="#b05000" fontcolor=white]
+    SPRING_CONTROLLER [label="SPRING_CONTROLLER\n(effort controller)" fillcolor="#4a7c59" fontcolor=white]
+
+    // ── Happy path ──────────────────────────────────────────────────────────
+    WAIT -> RETRIEVING_OBJECT [label=" button_pressed\n(color)" color="#1565c0"]
+    RETRIEVING_OBJECT -> WAITING_FOR_OBJECT [label=" at_supply_closet" color="#1565c0"]
+    WAITING_FOR_OBJECT -> NAVIGATING_HOME [label=" object_loaded" color="#1565c0"]
+    NAVIGATING_HOME -> LOCATING_OBJECT_AND_PEOPLE [label=" at_home" color="#1565c0"]
+    LOCATING_OBJECT_AND_PEOPLE -> PICK_AND_PLACE [label=" proceed\n(pose or None)" color="#7b61d9"]
+    PICK_AND_PLACE -> GRASPING [label=" arm_at_grasp_position" color="#b05000"]
+    GRASPING -> MOVE_TO_WORKSPACE [label=" grasp_confirmed\n(button)" color="#b05000"]
+    MOVE_TO_WORKSPACE -> SPRING_CONTROLLER [label=" in_workspace" color="#b05000"]
+    SPRING_CONTROLLER -> WAIT [label=" done" color="#2e7d32" style=dashed]
+
+    // ── Error paths (loop back to WAIT) ─────────────────────────────────────
+    RETRIEVING_OBJECT -> WAIT [label=" nav_error" color="#c62828" style=dashed constraint=false]
+    NAVIGATING_HOME -> WAIT [label=" nav_error" color="#c62828" style=dashed constraint=false]
+    PICK_AND_PLACE -> WAIT [label=" failed" color="#c62828" style=dashed constraint=false]
+    MOVE_TO_WORKSPACE -> WAIT [label=" failed" color="#c62828" style=dashed constraint=false]
+
+    // ── Layout hints ─────────────────────────────────────────────────────────
+    { rank=same; RETRIEVING_OBJECT; WAITING_FOR_OBJECT }
+}

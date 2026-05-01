@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Block Painting Helper</title>
+<script src="https://cdn.jsdelivr.net/npm/roslib@1/build/roslib.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, sans-serif; background: #f0f0ee; display: flex; flex-direction: column; min-height: 100vh; }
+
+/* ── Connection bar ── */
+.conn-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 16px; background: #fff; border-bottom: 1px solid #e0e0e0; flex-wrap: wrap;
+}
+.dot { width: 9px; height: 9px; border-radius: 50%; background: #bbb; flex-shrink: 0; }
+.dot.ok  { background: #3b8a3b; }
+.dot.err { background: #c83232; }
+.status-text { font-size: 13px; color: #666; }
+.conn-bar input {
+  padding: 5px 9px; border: 1px solid #ccc; border-radius: 7px;
+  font-size: 13px; font-family: inherit;
+}
+.conn-bar button {
+  padding: 5px 12px; border: 1px solid #ccc; border-radius: 7px;
+  background: #fff; cursor: pointer; font-size: 13px; font-family: inherit;
+}
+.conn-bar button:hover { background: #f0f0f0; }
+.conn-bar a { font-size: 13px; color: #185fa5; margin-left: 8px; }
+
+/* ── Topic config bar ── */
+.topic-bar {
+  display: flex; gap: 14px; flex-wrap: wrap;
+  padding: 7px 16px; background: #fafaf8; border-bottom: 1px solid #e8e8e8; align-items: center;
+}
+.topic-bar label { font-size: 11px; color: #888; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
+.topic-bar input { padding: 4px 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 12px; font-family: monospace; width: 185px; }
+
+/* ── Main layout ── */
+.main { flex: 1; display: flex; padding: 20px; gap: 20px; align-items: stretch; }
+
+/* ── Paint buttons (left column) ── */
+.paint-col { display: flex; flex-direction: column; gap: 12px; flex: 1; min-width: 0; }
+
+.paint-btn {
+  display: flex; align-items: center; gap: 16px;
+  padding: 12px 18px; border: 2px solid #ddd; border-radius: 14px;
+  background: #fff; cursor: pointer; font-family: inherit;
+  transition: border-color .14s, background .14s, transform .08s;
+  text-align: left; width: 100%;
+}
+.paint-btn:hover  { border-color: var(--accent); background: var(--hover-bg); }
+.paint-btn:active { transform: scale(0.985); }
+.paint-btn.flash  { border-color: var(--accent); background: var(--hover-bg); transform: scale(0.985); }
+.btn-label { font-size: 17px; font-weight: 600; color: #1a1a1a; }
+
+/* ── Arm mode toggle (right column) ── */
+.toggle-col { width: 155px; flex-shrink: 0; display: flex; flex-direction: column; }
+
+.toggle-wrap {
+  flex: 1; display: flex; flex-direction: column;
+  border: 2px solid #ddd; border-radius: 16px; overflow: hidden;
+}
+.toggle-half {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 16px 10px; gap: 7px; cursor: pointer;
+  transition: background .18s, color .18s; user-select: none;
+}
+.toggle-half.active          { background: #185fa5; color: #fff; }
+.toggle-half:not(.active)    { background: #fafaf8; color: #999; }
+.toggle-half:not(.active):hover { background: #eeeeed; color: #555; }
+
+.toggle-glyph { font-size: 26px; line-height: 1; }
+.toggle-label {
+  font-size: 12px; font-weight: 700; text-align: center;
+  text-transform: uppercase; letter-spacing: .05em; line-height: 1.35;
+}
+.toggle-divider { height: 2px; background: #ddd; flex-shrink: 0; }
+
+/* ── Log ── */
+.log-bar { padding: 10px 20px; background: #fff; border-top: 1px solid #e0e0e0; }
+.log {
+  font-family: monospace; font-size: 11px; background: #fafafa;
+  border: 1px solid #e8e8e8; border-radius: 8px; padding: 8px 10px;
+  max-height: 72px; overflow-y: auto; color: #555;
+}
+.log p { margin: 1px 0; line-height: 1.5; }
+.l-ok   { color: #2e6e2e; }
+.l-err  { color: #a32020; }
+.l-info { color: #185fa5; }
+</style>
+</head>
+<body>
+
+<!-- ── Connection bar ── -->
+<div class="conn-bar">
+  <span class="dot" id="dot"></span>
+  <span class="status-text" id="conn-label">Disconnected</span>
+  <input type="text" id="ws-url" value="ws://localhost:9090" style="width:205px">
+  <button id="btn-connect">Connect</button>
+  <button id="btn-disconnect">Disconnect</button>
+  <a href="/humanrequest" target="_blank">Open human request display &rarr;</a>
+</div>
+
+<!-- ── Topic config ── -->
+<div class="topic-bar">
+  <label>Button topic</label>
+  <input id="t-button" value="/button">
+  <label>Material topic</label>
+  <input id="t-material" value="/requestedmaterial">
+  <label>Arm mode topic</label>
+  <input id="t-armmode" value="/arm_control_mode">
+</div>
+
+<!-- ── Main panel ── -->
+<div class="main">
+
+  <!-- Left: paint buttons -->
+  <div class="paint-col">
+
+    <!-- Red -->
+    <button class="paint-btn" data-color="red"
+      style="--accent:#C83232; --hover-bg:#fdf0f0">
+      <svg viewBox="0 0 100 66" xmlns="http://www.w3.org/2000/svg" width="90" height="59" style="display:block;overflow:visible">
+        <rect x="2" y="28" width="96" height="34" rx="5" fill="#C83232"/>
+        <rect x="2" y="56" width="96" height="6" rx="3" fill="#A02828"/>
+        <rect x="2" y="28" width="96" height="10" rx="4" fill="#E85555" opacity="0.45"/>
+        <rect x="13" y="12" width="24" height="18" fill="#C83232"/>
+        <rect x="63" y="12" width="24" height="18" fill="#C83232"/>
+        <ellipse cx="25" cy="28" rx="12" ry="5" fill="#A02828"/>
+        <ellipse cx="75" cy="28" rx="12" ry="5" fill="#A02828"/>
+        <ellipse cx="25" cy="12" rx="12" ry="6" fill="#E85555"/>
+        <ellipse cx="75" cy="12" rx="12" ry="6" fill="#E85555"/>
+        <ellipse cx="21" cy="9" rx="6" ry="3" fill="rgba(255,255,255,0.45)"/>
+        <ellipse cx="71" cy="9" rx="6" ry="3" fill="rgba(255,255,255,0.45)"/>
+      </svg>
+      <span class="btn-label">Get Red Paint</span>
+    </button>
+
+    <!-- Blue -->
+    <button class="paint-btn" data-color="blue"
+      style="--accent:#2860B4; --hover-bg:#f0f4fd">
+      <svg viewBox="0 0 100 66" xmlns="http://www.w3.org/2000/svg" width="90" height="59" style="display:block;overflow:visible">
+        <rect x="2" y="28" width="96" height="34" rx="5" fill="#2860B4"/>
+        <rect x="2" y="56" width="96" height="6" rx="3" fill="#1A4A94"/>
+        <rect x="2" y="28" width="96" height="10" rx="4" fill="#4A85DC" opacity="0.45"/>
+        <rect x="13" y="12" width="24" height="18" fill="#2860B4"/>
+        <rect x="63" y="12" width="24" height="18" fill="#2860B4"/>
+        <ellipse cx="25" cy="28" rx="12" ry="5" fill="#1A4A94"/>
+        <ellipse cx="75" cy="28" rx="12" ry="5" fill="#1A4A94"/>
+        <ellipse cx="25" cy="12" rx="12" ry="6" fill="#4A85DC"/>
+        <ellipse cx="75" cy="12" rx="12" ry="6" fill="#4A85DC"/>
+        <ellipse cx="21" cy="9" rx="6" ry="3" fill="rgba(255,255,255,0.45)"/>
+        <ellipse cx="71" cy="9" rx="6" ry="3" fill="rgba(255,255,255,0.45)"/>
+      </svg>
+      <span class="btn-label">Get Blue Paint</span>
+    </button>
+
+    <!-- Yellow -->
+    <button class="paint-btn" data-color="yellow"
+      style="--accent:#D4A800; --hover-bg:#fdf9e0">
+      <svg viewBox="0 0 100 66" xmlns="http://www.w3.org/2000/svg" width="90" height="59" style="display:block;overflow:visible">
+        <rect x="2" y="28" width="96" height="34" rx="5" fill="#D4A800"/>
+        <rect x="2" y="56" width="96" height="6" rx="3" fill="#B48800"/>
+        <rect x="2" y="28" width="96" height="10" rx="4" fill="#EBC830" opacity="0.45"/>
+        <rect x="13" y="12" width="24" height="18" fill="#D4A800"/>
+        <rect x="63" y="12" width="24" height="18" fill="#D4A800"/>
+        <ellipse cx="25" cy="28" rx="12" ry="5" fill="#B48800"/>
+        <ellipse cx="75" cy="28" rx="12" ry="5" fill="#B48800"/>
+        <ellipse cx="25" cy="12" rx="12" ry="6" fill="#EBC830"/>
+        <ellipse cx="75" cy="12" rx="12" ry="6" fill="#EBC830"/>
+        <ellipse cx="21" cy="9" rx="6" ry="3" fill="rgba(255,255,255,0.45)"/>
+        <ellipse cx="71" cy="9" rx="6" ry="3" fill="rgba(255,255,255,0.45)"/>
+      </svg>
+      <span class="btn-label">Get Yellow Paint</span>
+    </button>
+
+    <!-- Green -->
+    <button class="paint-btn" data-color="green"
+      style="--accent:#2E7A2E; --hover-bg:#f0faf0">
+      <svg viewBox="0 0 100 66" xmlns="http://www.w3.org/2000/svg" width="90" height="59" style="display:block;overflow:visible">
+        <rect x="2" y="28" width="96" height="34" rx="5" fill="#2E7A2E"/>
+        <rect x="2" y="56" width="96" height="6" rx="3" fill="#1E5A1E"/>
+        <rect x="2" y="28" width="96" height="10" rx="4" fill="#4AAA4A" opacity="0.45"/>
+        <rect x="13" y="12" width="24" height="18" fill="#2E7A2E"/>
+        <rect x="63" y="12" width="24" height="18" fill="#2E7A2E"/>
+        <ellipse cx="25" cy="28" rx="12" ry="5" fill="#1E5A1E"/>
+        <ellipse cx="75" cy="28" rx="12" ry="5" fill="#1E5A1E"/>
+        <ellipse cx="25" cy="12" rx="12" ry="6" fill="#4AAA4A"/>
+        <ellipse cx="75" cy="12" rx="12" ry="6" fill="#4AAA4A"/>
+        <ellipse cx="21" cy="9" rx="6" ry="3" fill="rgba(255,255,255,0.45)"/>
+        <ellipse cx="71" cy="9" rx="6" ry="3" fill="rgba(255,255,255,0.45)"/>
+      </svg>
+      <span class="btn-label">Get Green Paint</span>
+    </button>
+
+  </div><!-- /.paint-col -->
+
+  <!-- Right: arm mode toggle -->
+  <div class="toggle-col">
+    <div class="toggle-wrap">
+
+      <div class="toggle-half active" id="half-spring" onclick="setMode('spring_controller')">
+        <div class="toggle-glyph">&#x2948;</div><!-- ↨ spring-ish -->
+        <div class="toggle-label">Spring<br>Controller</div>
+      </div>
+
+      <div class="toggle-divider"></div>
+
+      <div class="toggle-half" id="half-hold" onclick="setMode('hold_position')">
+        <div class="toggle-glyph">&#x29BF;</div><!-- filled circle = locked -->
+        <div class="toggle-label">Hold<br>Position</div>
+      </div>
+
+    </div>
+  </div><!-- /.toggle-col -->
+
+</div><!-- /.main -->
+
+<!-- ── Activity log ── -->
+<div class="log-bar">
+  <div class="log" id="log">
+    <p class="l-info">Ready &mdash; connect to rosbridge to publish.</p>
+  </div>
+</div>
+
+<script>
+'use strict';
+let ros = null;
+
+function addLog(msg, cls) {
+  const el = document.getElementById('log');
+  const p  = document.createElement('p');
+  if (cls) p.className = cls;
+  p.textContent = new Date().toTimeString().slice(0, 8) + '  ' + msg;
+  el.appendChild(p);
+  el.scrollTop = el.scrollHeight;
+  while (el.children.length > 80) el.removeChild(el.firstChild);
+}
+
+function pub(inputId, msgType, payload) {
+  const name = document.getElementById(inputId).value.trim();
+  const msg  = (typeof payload === 'string') ? { data: payload } : payload;
+  if (!ros || !ros.isConnected) {
+    addLog('[offline] ' + name + ' → ' + JSON.stringify(msg), 'l-info');
+    return;
+  }
+  const t = new ROSLIB.Topic({ ros: ros, name: name, messageType: msgType });
+  t.publish(new ROSLIB.Message(msg));
+  addLog('→ ' + name + ': ' + JSON.stringify(msg), 'l-ok');
+}
+
+// Paint buttons — send /button first, then /requestedmaterial 150 ms later
+// so the humanrequest page receives /button while still in "idle" state
+// and only transitions to "please" when /requestedmaterial arrives.
+document.querySelectorAll('.paint-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    const color = btn.dataset.color;
+    pub('t-button',   'std_msgs/msg/String', 'go');
+    setTimeout(function() {
+      pub('t-material', 'std_msgs/msg/String', color);
+    }, 150);
+    btn.classList.add('flash');
+    setTimeout(function() { btn.classList.remove('flash'); }, 380);
+    addLog('Requested ' + color + ' paint block', 'l-info');
+  });
+});
+
+// Arm mode toggle
+function setMode(mode) {
+  document.getElementById('half-spring').classList.toggle('active', mode === 'spring_controller');
+  document.getElementById('half-hold').classList.toggle('active',   mode === 'hold_position');
+  pub('t-armmode', 'std_msgs/msg/String', mode);
+}
+
+// Rosbridge connection
+function connectRos() {
+  const url = document.getElementById('ws-url').value.trim();
+  if (ros) ros.close();
+  ros = new ROSLIB.Ros({ url: url });
+  ros.on('connection', function() {
+    document.getElementById('dot').className = 'dot ok';
+    document.getElementById('conn-label').textContent = 'Connected';
+    addLog('Connected to ' + url, 'l-ok');
+  });
+  ros.on('error', function(e) {
+    document.getElementById('dot').className = 'dot err';
+    document.getElementById('conn-label').textContent = 'Error';
+    addLog('ROS error: ' + (e.message || String(e)), 'l-err');
+  });
+  ros.on('close', function() {
+    document.getElementById('dot').className = 'dot';
+    document.getElementById('conn-label').textContent = 'Disconnected';
+    addLog('Disconnected');
+  });
+}
+
+document.getElementById('btn-connect').addEventListener('click', connectRos);
+document.getElementById('btn-disconnect').addEventListener('click', function() {
+  if (ros) ros.close();
+});
+</script>
+</body>
+</html>
