@@ -57,6 +57,23 @@ body {
   font-style: italic;
 }
 
+.yes-btn {
+  margin-top: 12px;
+  padding: 18px 44px;
+  font-size: clamp(20px, 3.5vw, 34px);
+  font-weight: 700;
+  font-family: inherit;
+  background: #2E7A2E;
+  color: #fff;
+  border: none;
+  border-radius: 16px;
+  cursor: pointer;
+  transition: background .14s, transform .08s;
+}
+.yes-btn:hover   { background: #236423; }
+.yes-btn:active  { transform: scale(0.97); }
+.yes-btn:disabled { opacity: 0.5; cursor: default; }
+
 /* ── ROS URL config (collapsed by default, click status strip to expand) ── */
 .config-drawer {
   display: none;
@@ -169,7 +186,12 @@ function renderDisplay() {
       '<div class="block-img">' + svg + '</div>' +
       '<p class="msg-line">Please may I have a</p>' +
       colorLabel +
-      '<p class="msg-line">block?</p>';
+      '<p class="msg-line">block?</p>' +
+      '<button class="yes-btn" id="yes-btn">Yes, here you go!</button>';
+    document.getElementById('yes-btn').addEventListener('click', function() {
+      this.disabled = true;
+      giveBlock();
+    });
   } else if (state === 'thankyou') {
     el.innerHTML =
       '<div class="block-img">' + svg + '</div>' +
@@ -177,6 +199,23 @@ function renderDisplay() {
       colorLabel +
       '<p class="msg-line">block!</p>';
   }
+}
+
+// ── Publish helpers ─────────────────────────────────────────────────────
+function pubTopic(name, data) {
+  if (!ros || !ros.isConnected) return;
+  const t = new ROSLIB.Topic({ ros: ros, name: name, messageType: 'std_msgs/msg/String' });
+  t.publish(new ROSLIB.Message({ data: data }));
+}
+
+// Publish /requestedmaterial first, then /button.
+// The page receives its own echoes; /requestedmaterial keeps us in "please",
+// then /button advances to "thankyou".
+function giveBlock() {
+  const materialTopic = document.getElementById('t-material').value.trim();
+  const buttonTopic   = document.getElementById('t-button').value.trim();
+  pubTopic(materialTopic, currentColor);
+  pubTopic(buttonTopic, 'go');
 }
 
 // ── ROS connection ───────────────────────────────────────────────────────

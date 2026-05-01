@@ -47,13 +47,19 @@ On your machine local to the camera:
 ros2 run v4l2_camera v4l2_camera_node  --ros-args -r image_raw:=/bph_overhead_camera/image_raw -r video_device:='/dev/video0'
 
 On your static computer:
-    source ~/.ros_venv/bin/activate
 To enable rosbridge safely across the local network:
-     ssh -L 9090:localhost:9090 baymax@10.5.10.74 (check this IP)
-  To start everything else:
-     ros2 launch bph_statemachine demo.launch.py
+source ~/.ros_venv/bin/activate
+ssh -L 9090:localhost:9090 baymax@10.5.10.74 (check this IP)
 
+Everything else robot:
+source ~/.ros_venv/bin/activate
+ros2 launch bph_statemachine demo.launch.py
 
+User interface:
+ ros2 run rosbridge_server rosbridge_websocket --ros-args -p port:=9405 -p "qos_overrides./button.subscription.durability:=volatile" -p "qos_overrides./requestedmaterial.subscription.durability:=volatile" 
+
+second terminal:
+python3 /home/katallen/sandbox/src/block-painting-helper/bph_userinterface/bph_ui_server.py 
 
 
 STATUS:
