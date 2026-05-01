@@ -12,8 +12,17 @@ ros2 launch slam_toolbox online_async_launch.py use_sim_time:=False
 
 - measure turtlebot height
 - measure turtlebot and supply closet positions
+from base_link
+720 table to floor
+300 table edge to "tb_home"
+
+
+x offset 300+65 center of arm to tb_home
+y offset 65+130 center of arm to tb_home
+z offset 215+720
 
 Cleanup after demo:
+
 
 
 DONE
